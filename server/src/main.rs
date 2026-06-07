@@ -28,6 +28,85 @@ pub struct UploadInfo {
 pub struct ServerState {
     pub uploads: HashMap<String, UploadInfo>,
     pub upload_dir: String,
+    pub db_path: String,
+}
+
+fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS uploads (
+            packet_code TEXT PRIMARY KEY,
+            file_name TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            bytes_received INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, rusqlite::Error> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    let mut stmt = conn.prepare("SELECT packet_code, file_name, file_size, bytes_received, status, started_at, completed_at FROM uploads")?;
+    let upload_iter = stmt.query_map([], |row| {
+        let started_at_str: String = row.get(5)?;
+        let completed_at_str: Option<String> = row.get(6)?;
+
+        let started_at = DateTime::parse_from_rfc3339(&started_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        let completed_at = completed_at_str.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok()
+        });
+
+        Ok(UploadInfo {
+            packet_code: row.get(0)?,
+            file_name: row.get(1)?,
+            file_size: row.get(2)?,
+            bytes_received: row.get(3)?,
+            status: row.get(4)?,
+            started_at,
+            completed_at,
+        })
+    })?;
+
+    let mut uploads = HashMap::new();
+    for upload in upload_iter {
+        let u = upload?;
+        uploads.insert(u.packet_code.clone(), u);
+    }
+    Ok(uploads)
+}
+
+fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::Error> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    conn.execute(
+        "INSERT INTO uploads (packet_code, file_name, file_size, bytes_received, status, started_at, completed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(packet_code) DO UPDATE SET
+            file_name = excluded.file_name,
+            file_size = excluded.file_size,
+            bytes_received = excluded.bytes_received,
+            status = excluded.status,
+            started_at = excluded.started_at,
+            completed_at = excluded.completed_at",
+        rusqlite::params![
+            info.packet_code,
+            info.file_name,
+            info.file_size,
+            info.bytes_received,
+            info.status,
+            info.started_at.to_rfc3339(),
+            info.completed_at.map(|dt| dt.to_rfc3339()),
+        ],
+    )?;
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -606,7 +685,16 @@ async fn register_upload(
         started_at,
         completed_at: if status == "Hoàn thành" { Some(started_at) } else { None },
     };
-    lock.uploads.insert(payload.packet_code.clone(), info);
+    lock.uploads.insert(payload.packet_code.clone(), info.clone());
+
+    // Save to SQLite
+    let db_path = lock.db_path.clone();
+    let save_info = info.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = save_upload_to_db(&db_path, &save_info) {
+            eprintln!("[DB] Failed to save register to DB: {}", e);
+        }
+    });
 
     // Only create/truncate the file if it's a fresh upload
     if bytes_received == 0 {
@@ -709,6 +797,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
 
                         if write_success {
                             let mut lock = state.write().await;
+                            let db_path = lock.db_path.clone();
                             if let Some(entry) = lock.uploads.get_mut(&unique_id) {
                                 if is_end {
                                     entry.status = "Hoàn thành".to_string();
@@ -725,6 +814,14 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                         entry.file_size = entry.bytes_received;
                                     }
                                 }
+
+                                // Save to SQLite
+                                let save_info = entry.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    if let Err(e) = save_upload_to_db(&db_path, &save_info) {
+                                        eprintln!("[DB] Failed to save update to DB: {}", e);
+                                    }
+                                });
                             }
 
                             // Send back ACK only on success
@@ -756,9 +853,30 @@ async fn main() {
     let upload_dir = "./uploads".to_string();
     let _ = std::fs::create_dir_all(&upload_dir);
 
+    // Initialize SQLite database
+    let db_dir = "./db".to_string();
+    let _ = std::fs::create_dir_all(&db_dir);
+    let db_path = "./db/data.sqlite".to_string();
+    if let Err(e) = init_db(&db_path) {
+        eprintln!("[DB] Failed to initialize SQLite database: {}", e);
+    }
+
+    // Load existing uploads from SQLite
+    let uploads = match load_uploads_from_db(&db_path) {
+        Ok(map) => {
+            println!("[DB] Loaded {} uploads from SQLite database.", map.len());
+            map
+        }
+        Err(e) => {
+            eprintln!("[DB] Failed to load uploads from DB: {}. Starting with empty cache.", e);
+            HashMap::new()
+        }
+    };
+
     let state = Arc::new(RwLock::new(ServerState {
-        uploads: HashMap::new(),
+        uploads,
         upload_dir: upload_dir.clone(),
+        db_path,
     }));
 
     // Start UDP Server Task
