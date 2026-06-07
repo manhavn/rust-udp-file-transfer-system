@@ -156,8 +156,15 @@ async fn main() -> Result<(), String> {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
                     if let Some(offset) = json.get("bytes_received").and_then(|v| v.as_u64()) {
                         if offset > 0 {
-                            println!("   -> Phát hiện tệp tải lên dang dở. Sẽ tiếp tục truyền từ byte thứ {} ({:.2}%)", offset, (offset as f64 / file_size as f64) * 100.0);
-                            seek_begin = offset;
+                            // Align down to block size to ensure any partially written block is completely overwritten
+                            let block_size = args.block_size as u64;
+                            let aligned_offset = (offset / block_size) * block_size;
+                            if aligned_offset > 0 {
+                                println!("   -> Phát hiện tệp tải lên dang dở. Sẽ tiếp tục truyền từ byte thứ {} (làm tròn từ {}, {:.2}%)", aligned_offset, offset, (aligned_offset as f64 / file_size as f64) * 100.0);
+                                seek_begin = aligned_offset;
+                            } else {
+                                println!("   -> Phát hiện tệp tải lên dang dở nhưng nhỏ hơn kích thước block ({} bytes). Sẽ tải lên lại từ đầu.", offset);
+                            }
                         }
                     }
                 }

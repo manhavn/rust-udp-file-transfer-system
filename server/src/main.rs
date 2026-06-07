@@ -683,48 +683,58 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     completed_at: None,
                                 }
                             });
-
-                            if is_end {
-                                entry.status = "Hoàn thành".to_string();
-                                entry.completed_at = Some(Utc::now());
-                                entry.file_size = packet.seek_begin;
-                                entry.bytes_received = packet.seek_begin;
-                                println!("[UDP] Completed upload of file: {}", entry.file_name);
-                            } else {
-                                let end_pos = packet.seek_begin + packet.data.len() as u64;
-                                if end_pos > entry.bytes_received {
-                                    entry.bytes_received = end_pos;
-                                }
-                                if entry.file_size < entry.bytes_received {
-                                    entry.file_size = entry.bytes_received;
-                                }
-                            }
                             entry.file_name.clone()
                         };
 
+                        let mut write_success = is_end; // End packet has no data, treated as success
                         if !is_end && !packet.data.is_empty() {
                             let file_path = std::path::Path::new(&state.read().await.upload_dir).join(&file_name);
                             let seek_begin = packet.seek_begin;
                             let data = packet.data.to_vec();
 
-                            let _ = tokio::task::spawn_blocking(move || {
+                            let write_res = tokio::task::spawn_blocking(move || {
                                 use std::fs::OpenOptions;
                                 use std::io::{Seek, SeekFrom, Write};
-                                if let Ok(mut file) = OpenOptions::new().write(true).open(&file_path) {
-                                    let _ = file.seek(SeekFrom::Start(seek_begin));
-                                    let _ = file.write_all(&data);
-                                    let _ = file.flush();
-                                }
+                                let mut file = OpenOptions::new().write(true).open(&file_path)?;
+                                file.seek(SeekFrom::Start(seek_begin))?;
+                                file.write_all(&data)?;
+                                file.flush()?;
+                                Ok::<(), std::io::Error>(())
                             }).await;
+
+                            if let Ok(Ok(())) = write_res {
+                                write_success = true;
+                            }
                         }
 
-                        // Send back ACK
-                        let ack_bytes = if is_end {
-                            common::AckPacket::serialize(packet.packet_code, packet.seek_begin, 0)
-                        } else {
-                            common::AckPacket::serialize(packet.packet_code, packet.seek_begin, packet.data.len() as u64)
-                        };
-                        let _ = socket.send_to(&ack_bytes, src).await;
+                        if write_success {
+                            let mut lock = state.write().await;
+                            if let Some(entry) = lock.uploads.get_mut(&unique_id) {
+                                if is_end {
+                                    entry.status = "Hoàn thành".to_string();
+                                    entry.completed_at = Some(Utc::now());
+                                    entry.file_size = packet.seek_begin;
+                                    entry.bytes_received = packet.seek_begin;
+                                    println!("[UDP] Completed upload of file: {}", entry.file_name);
+                                } else {
+                                    let end_pos = packet.seek_begin + packet.data.len() as u64;
+                                    if end_pos > entry.bytes_received {
+                                        entry.bytes_received = end_pos;
+                                    }
+                                    if entry.file_size < entry.bytes_received {
+                                        entry.file_size = entry.bytes_received;
+                                    }
+                                }
+                            }
+
+                            // Send back ACK only on success
+                            let ack_bytes = if is_end {
+                                common::AckPacket::serialize(packet.packet_code, packet.seek_begin, 0)
+                            } else {
+                                common::AckPacket::serialize(packet.packet_code, packet.seek_begin, packet.data.len() as u64)
+                            };
+                            let _ = socket.send_to(&ack_bytes, src).await;
+                        }
                     }
                     Err(e) => {
                         eprintln!("[UDP] Error parsing packet: {}", e);

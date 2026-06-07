@@ -163,7 +163,8 @@ pub extern "C" fn rtk_upload_file(
             if resp.status().is_success() {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
                     if let Some(offset) = json.get("bytes_received").and_then(|v| v.as_u64()) {
-                        seek_begin = offset;
+                        let b_size = block_size as u64;
+                        seek_begin = (offset / b_size) * b_size;
                     }
                 }
             }
