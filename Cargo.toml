@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "common",
+    "server",
+    "client_cli",
+    "client_lib"
+]
+resolver = "2"
