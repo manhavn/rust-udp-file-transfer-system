@@ -594,17 +594,16 @@ const INDEX_HTML: &str = r#"
         function formatDateTime(dateStr) {
             if (!dateStr) return '-';
             const date = new Date(dateStr);
-            return date.toLocaleString('vi-VN');
+            return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
         }
 
         function calculateDuration(startStr, endStr) {
             const start = new Date(startStr);
             const end = endStr ? new Date(endStr) : new Date();
             const diffMs = end - start;
-            const diffSecs = Math.max(0, Math.floor(diffMs / 1000));
-            if (diffSecs < 60) return `${diffSecs} giây`;
-            const diffMins = Math.floor(diffSecs / 60);
-            return `${diffMins} phút ${diffSecs % 60} giây`;
+            const diffMins = Math.max(0, Math.floor(diffMs / 60000));
+            if (diffMins === 0) return `< 1 phút`;
+            return `${diffMins} phút`;
         }
 
         function formatDeleteAt(deleteAtStr) {
@@ -618,7 +617,8 @@ const INDEX_HTML: &str = r#"
                 return `<span style="font-size: 0.82rem; color: var(--warning)">Đang xóa...</span>`;
             }
             
-            return `<span style="font-size: 0.82rem; color: #f43f5e; font-weight: 500;">Tự hủy: ${deleteAt.toLocaleTimeString('vi-VN')} (còn ${diffMins} phút)</span>`;
+            const timeStr = deleteAt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+            return `<span style="font-size: 0.82rem; color: #f43f5e; font-weight: 500;">Tự hủy: ${timeStr} (còn ${diffMins} phút)</span>`;
         }
 
         async function fetchUploads() {
@@ -701,7 +701,7 @@ const INDEX_HTML: &str = r#"
 
         // Auto fetch every 1.5 seconds
         fetchUploads();
-        setInterval(fetchUploads, 1500);
+        setInterval(fetchUploads, 5000);
     </script>
 </body>
 </html>
