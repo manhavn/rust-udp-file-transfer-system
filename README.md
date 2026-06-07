@@ -125,16 +125,27 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
 *   `--http-port` / `-t`: Cổng HTTP của Server (mặc định: `8080`).
 *   `--block-size` / `-b`: Kích thước mỗi khối dữ liệu UDP gửi đi tính bằng bytes (mặc định: `16384` bytes).
 *   `--log-progress`: Hiển thị tiến trình upload dưới dạng log dòng mới (mặc định: tắt, hiển thị bằng `\r`).
+*   `--password` / `-p`: Mật khẩu bảo mật tải xuống dành cho file này (mặc định: không có).
 
 #### Ví dụ gửi tệp tin với cấu hình đầy đủ tất cả tham số (Khởi chạy trực tiếp file thực thi):
 *   **Linux/macOS:**
-    ```bash
-    ./target/release/client_cli video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
-    ```
+    *   **Không sử dụng mật khẩu:**
+        ```bash
+        ./target/release/client_cli video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+        ```
+    *   **Có sử dụng mật khẩu:**
+        ```bash
+        ./target/release/client_cli video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress --password mysecret123
+        ```
 *   **Windows (Command Prompt):**
-    ```cmd
-    target\release\client_cli.exe video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
-    ```
+    *   **Không sử dụng mật khẩu:**
+        ```cmd
+        target\release\client_cli.exe video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+        ```
+    *   **Có sử dụng mật khẩu:**
+        ```cmd
+        target\release\client_cli.exe video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress --password mysecret123
+        ```
 
 ---
 
@@ -198,6 +209,7 @@ Cả Server và Client đều hỗ trợ đọc các giá trị cấu hình từ
 | `HTTP_PORT` | `--http-port`, `-t` | `8080` | Cổng HTTP của Server |
 | `BLOCK_SIZE` | `--block-size`, `-b` | `16384` | Kích thước khối UDP gửi đi (bytes) |
 | `LOG_PROGRESS` | `--log-progress` | `false` | Bật/tắt in log dòng mới |
+| `DOWNLOAD_PASSWORD` | `--password`, `-p` | (Không có) | Mật khẩu bảo mật khi tải file xuống |
 
 > [!NOTE]
 > Các tham số được truyền trực tiếp qua dòng lệnh (CLI Parameters) sẽ luôn có **độ ưu tiên cao nhất** và ghi đè lên các giá trị cấu hình được thiết lập trong biến môi trường.
@@ -355,46 +367,78 @@ Các kịch bản này sẽ tự động kiểm tra và nạp ảnh từ tệp `
 Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume Mount) tệp tin hoặc thư mục chứa tệp tin vào trong Container. Nên sử dụng chế độ chỉ đọc (`:ro`) để bảo vệ dữ liệu gốc trên máy host.
 
 *   **Sử dụng Docker:**
-    *   **Truyền đầy đủ tham số qua dòng lệnh (CLI):**
-        ```bash
-        docker run --rm -it \
-          -v $(pwd):/data:ro \
-          rtk.udp/client \
-          /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
-        ```
-    *   **Truyền đầy đủ cấu hình qua biến môi trường (ENV):**
-        ```bash
-        docker run --rm -it \
-          -v $(pwd):/data:ro \
-          -e FILE_PATH=/data/video.mp4 \
-          -e SERVER_IP=192.168.1.100 \
-          -e UDP_PORT=5000 \
-          -e HTTP_PORT=8080 \
-          -e BLOCK_SIZE=16384 \
-          -e LOG_PROGRESS=true \
-          rtk.udp/client
-        ```
+    *   **Truyền tham số qua dòng lệnh (CLI):**
+        *   *Không mật khẩu:*
+            ```bash
+            docker run --rm -it -v $(pwd):/data:ro rtk.udp/client /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+            ```
+        *   *Có mật khẩu:*
+            ```bash
+            docker run --rm -it -v $(pwd):/data:ro rtk.udp/client /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress --password mysecret123
+            ```
+    *   **Truyền cấu hình qua biến môi trường (ENV):**
+        *   *Không mật khẩu:*
+            ```bash
+            docker run --rm -it \
+              -v $(pwd):/data:ro \
+              -e FILE_PATH=/data/video.mp4 \
+              -e SERVER_IP=192.168.1.100 \
+              -e UDP_PORT=5000 \
+              -e HTTP_PORT=8080 \
+              -e BLOCK_SIZE=16384 \
+              -e LOG_PROGRESS=true \
+              rtk.udp/client
+            ```
+        *   *Có mật khẩu:*
+            ```bash
+            docker run --rm -it \
+              -v $(pwd):/data:ro \
+              -e FILE_PATH=/data/video.mp4 \
+              -e SERVER_IP=192.168.1.100 \
+              -e UDP_PORT=5000 \
+              -e HTTP_PORT=8080 \
+              -e BLOCK_SIZE=16384 \
+              -e LOG_PROGRESS=true \
+              -e DOWNLOAD_PASSWORD=mysecret123 \
+              rtk.udp/client
+            ```
 
 *   **Sử dụng Podman (sử dụng thêm nhãn `:Z` để gán nhãn SELinux phù hợp):**
-    *   **Truyền đầy đủ tham số qua dòng lệnh (CLI):**
-        ```bash
-        podman run --rm -it \
-          -v $(pwd):/data:ro,Z \
-          rtk.udp/client \
-          /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
-        ```
-    *   **Truyền đầy đủ cấu hình qua biến môi trường (ENV):**
-        ```bash
-        podman run --rm -it \
-          -v $(pwd):/data:ro,Z \
-          -e FILE_PATH=/data/video.mp4 \
-          -e SERVER_IP=192.168.1.100 \
-          -e UDP_PORT=5000 \
-          -e HTTP_PORT=8080 \
-          -e BLOCK_SIZE=16384 \
-          -e LOG_PROGRESS=true \
-          rtk.udp/client
-        ```
+    *   **Truyền tham số qua dòng lệnh (CLI):**
+        *   *Không mật khẩu:*
+            ```bash
+            podman run --rm -it -v $(pwd):/data:ro,Z rtk.udp/client /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+            ```
+        *   *Có mật khẩu:*
+            ```bash
+            podman run --rm -it -v $(pwd):/data:ro,Z rtk.udp/client /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress --password mysecret123
+            ```
+    *   **Truyền cấu hình qua biến môi trường (ENV):**
+        *   *Không mật khẩu:*
+            ```bash
+            podman run --rm -it \
+              -v $(pwd):/data:ro,Z \
+              -e FILE_PATH=/data/video.mp4 \
+              -e SERVER_IP=192.168.1.100 \
+              -e UDP_PORT=5000 \
+              -e HTTP_PORT=8080 \
+              -e BLOCK_SIZE=16384 \
+              -e LOG_PROGRESS=true \
+              rtk.udp/client
+            ```
+        *   *Có mật khẩu:*
+            ```bash
+            podman run --rm -it \
+              -v $(pwd):/data:ro,Z \
+              -e FILE_PATH=/data/video.mp4 \
+              -e SERVER_IP=192.168.1.100 \
+              -e UDP_PORT=5000 \
+              -e HTTP_PORT=8080 \
+              -e BLOCK_SIZE=16384 \
+              -e LOG_PROGRESS=true \
+              -e DOWNLOAD_PASSWORD=mysecret123 \
+              rtk.udp/client
+            ```
 
 ---
 

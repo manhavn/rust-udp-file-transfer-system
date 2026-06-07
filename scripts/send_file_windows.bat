@@ -2,8 +2,8 @@
 chcp 65001 > nul
 
 if "%~1" == "" (
-    echo Sử dụng: %~0 ^<đường_dẫn_file^> [ip_server] [cổng_udp] [cổng_http]
-    echo Ví dụ: %~0 video.mp4 127.0.0.1 5000 8080
+    echo Sử dụng: %~0 ^<đường_dẫn_file^> [ip_server] [cổng_udp] [cổng_http] [mật_khẩu]
+    echo Ví dụ: %~0 video.mp4 127.0.0.1 5000 8080 mysecret123
     pause
     exit /b 1
 )
@@ -15,6 +15,7 @@ set UDP_PORT=%~3
 if "%UDP_PORT%"=="" set UDP_PORT=5000
 set HTTP_PORT=%~4
 if "%HTTP_PORT%"=="" set HTTP_PORT=8080
+set PASSWORD=%~5
 
 set BINARY=
 if exist "target\x86_64-pc-windows-gnu\release\client_cli.exe" (
@@ -40,4 +41,8 @@ if "%BINARY%"=="" (
 )
 
 echo ==> Đang bắt đầu gửi file qua Windows client...
-%BINARY% "%FILE%" --server-ip "%IP%" --udp-port "%UDP_PORT%" --http-port "%HTTP_PORT%" --log-progress
+if "%PASSWORD%"=="" (
+    %BINARY% "%FILE%" --server-ip "%IP%" --udp-port "%UDP_PORT%" --http-port "%HTTP_PORT%" --log-progress
+) else (
+    %BINARY% "%FILE%" --server-ip "%IP%" --udp-port "%UDP_PORT%" --http-port "%HTTP_PORT%" --password "%PASSWORD%" --log-progress
+)

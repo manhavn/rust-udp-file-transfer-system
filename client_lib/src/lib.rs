@@ -81,9 +81,45 @@ pub extern "C" fn rtk_upload_file(
     http_port: u16,
     block_size: usize,
 ) -> i32 {
+    rtk_upload_file_with_password(
+        c_file_path,
+        c_server_ip,
+        udp_port,
+        http_port,
+        block_size,
+        std::ptr::null(),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn rtk_upload_file_with_password(
+    c_file_path: *const c_char,
+    c_server_ip: *const c_char,
+    udp_port: u16,
+    http_port: u16,
+    block_size: usize,
+    c_password: *const c_char,
+) -> i32 {
     if c_file_path.is_null() || c_server_ip.is_null() {
         return -1;
     }
+
+    let password_str = if c_password.is_null() {
+        None
+    } else {
+        unsafe {
+            match CStr::from_ptr(c_password).to_str() {
+                Ok(s) => {
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s.to_string())
+                    }
+                }
+                Err(_) => return -1,
+            }
+        }
+    };
 
     let file_path_str = unsafe {
         match CStr::from_ptr(c_file_path).to_str() {
@@ -158,6 +194,7 @@ pub extern "C" fn rtk_upload_file(
                 "packet_code": packet_code_str,
                 "file_name": file_name,
                 "file_size": file_size,
+                "password": password_str,
             }))
             .send()
             .await;

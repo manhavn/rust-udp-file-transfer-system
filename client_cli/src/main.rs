@@ -33,6 +33,10 @@ struct Args {
     /// Hiển thị tiến trình upload dạng log dòng mới
     #[arg(long, env = "LOG_PROGRESS", default_value_t = false)]
     log_progress: bool,
+
+    /// Mật khẩu bảo mật để tải xuống file (mặc định không có)
+    #[arg(short = 'p', long, env = "DOWNLOAD_PASSWORD")]
+    password: Option<String>,
 }
 
 async fn send_chunk_with_retry(
@@ -154,6 +158,7 @@ async fn main() -> Result<(), String> {
             "packet_code": packet_code_str,
             "file_name": file_name,
             "file_size": file_size,
+            "password": args.password,
         }))
         .send()
         .await;

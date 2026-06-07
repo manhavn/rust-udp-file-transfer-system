@@ -14,8 +14,8 @@ if exist "target\release\client_cli.exe" (
 )
 
 if "%~1"=="" (
-    echo Sử dụng: %0 ^<đường_dẫn_file^> [ip_server] [cổng_udp] [cổng_http]
-    echo Ví dụ: %0 movie.mp4 127.0.0.1 5000 8080
+    echo Sử dụng: %0 ^<đường_dẫn_file^> [ip_server] [cổng_udp] [cổng_http] [mật_khẩu]
+    echo Ví dụ: %0 movie.mp4 127.0.0.1 5000 8080 mysecret123
     exit /b 1
 )
 
@@ -26,6 +26,7 @@ set UDP_PORT=%3
 if "%3" == "" set UDP_PORT=5000
 set HTTP_PORT=%4
 if "%4" == "" set HTTP_PORT=8080
+set PASSWORD=%5
 
 if not exist "%FILE_PATH%" (
     echo Lỗi: File "%FILE_PATH%" không tồn tại.
@@ -37,6 +38,13 @@ echo Khởi chạy RTK UDP Client trên Windows...
 echo File cần gửi: %FILE_PATH%
 echo Địa chỉ Server: %SERVER_IP%
 echo Cổng UDP: %UDP_PORT% ^| Cổng HTTP: %HTTP_PORT%
+if not "%PASSWORD%" == "" (
+    echo Mật khẩu tải xuống: *****
+)
 echo ==========================================================
 
-%BINARY% "%FILE_PATH%" --server-ip "%SERVER_IP%" --udp-port "%UDP_PORT%" --http-port "%HTTP_PORT%" --log-progress
+if "%PASSWORD%" == "" (
+    %BINARY% "%FILE_PATH%" --server-ip "%SERVER_IP%" --udp-port "%UDP_PORT%" --http-port "%HTTP_PORT%" --log-progress
+) else (
+    %BINARY% "%FILE_PATH%" --server-ip "%SERVER_IP%" --udp-port "%UDP_PORT%" --http-port "%HTTP_PORT%" --password "%PASSWORD%" --log-progress
+)

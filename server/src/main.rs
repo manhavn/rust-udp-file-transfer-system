@@ -25,6 +25,9 @@ pub struct UploadInfo {
     pub completed_at: Option<DateTime<Utc>>,
     pub delete_at: Option<DateTime<Utc>>,
     pub extended_delete_at: Option<DateTime<Utc>>,
+    pub has_password: bool,
+    #[serde(skip_serializing)]
+    pub password: Option<String>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -88,25 +91,28 @@ fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
             started_at TEXT NOT NULL,
             completed_at TEXT,
             delete_at TEXT,
-            extended_delete_at TEXT
+            extended_delete_at TEXT,
+            password TEXT
         )",
         [],
     )?;
-    // Attempt migration for existing databases missing the delete_at or extended_delete_at column
+    // Attempt migration for existing databases missing the delete_at, extended_delete_at or password column
     let _ = conn.execute("ALTER TABLE uploads ADD COLUMN delete_at TEXT", []);
     let _ = conn.execute("ALTER TABLE uploads ADD COLUMN extended_delete_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE uploads ADD COLUMN password TEXT", []);
     Ok(())
 }
 
 fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
-    let mut stmt = conn.prepare("SELECT packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at, extended_delete_at FROM uploads")?;
+    let mut stmt = conn.prepare("SELECT packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at, extended_delete_at, password FROM uploads")?;
     let upload_iter = stmt.query_map([], |row| {
         let started_at_str: String = row.get(5)?;
         let completed_at_str: Option<String> = row.get(6)?;
         let delete_at_str: Option<String> = row.get(7)?;
         let extended_delete_at_str: Option<String> = row.get(8)?;
+        let password: Option<String> = row.get(9)?;
 
         let started_at = DateTime::parse_from_rfc3339(&started_at_str)
             .map(|dt| dt.with_timezone(&Utc))
@@ -130,6 +136,8 @@ fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, ru
                 .ok()
         });
 
+        let has_password = password.is_some() && !password.as_ref().unwrap().is_empty();
+
         Ok(UploadInfo {
             packet_code: row.get(0)?,
             file_name: row.get(1)?,
@@ -140,6 +148,8 @@ fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, ru
             completed_at,
             delete_at,
             extended_delete_at,
+            has_password,
+            password,
         })
     })?;
 
@@ -155,8 +165,8 @@ fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::E
     let conn = rusqlite::Connection::open(db_path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute(
-        "INSERT INTO uploads (packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at, extended_delete_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO uploads (packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at, extended_delete_at, password)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(packet_code) DO UPDATE SET
             file_name = excluded.file_name,
             file_size = excluded.file_size,
@@ -165,7 +175,8 @@ fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::E
             started_at = excluded.started_at,
             completed_at = excluded.completed_at,
             delete_at = excluded.delete_at,
-            extended_delete_at = excluded.extended_delete_at",
+            extended_delete_at = excluded.extended_delete_at,
+            password = excluded.password",
         rusqlite::params![
             info.packet_code,
             info.file_name,
@@ -176,6 +187,7 @@ fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::E
             info.completed_at.map(|dt| dt.to_rfc3339()),
             info.delete_at.map(|dt| dt.to_rfc3339()),
             info.extended_delete_at.map(|dt| dt.to_rfc3339()),
+            info.password,
         ],
     )?;
     Ok(())
@@ -186,6 +198,7 @@ pub struct RegisterRequest {
     pub packet_code: String,
     pub file_name: String,
     pub file_size: u64,
+    pub password: Option<String>,
 }
 
 const INDEX_HTML: &str = r#"
@@ -679,14 +692,15 @@ const INDEX_HTML: &str = r#"
                         : (upload.file_size > 0 ? Math.min(100, Math.round((upload.bytes_received / upload.file_size) * 100)) : 0);
 
                     const statusClass = isCompleted ? 'badge-completed' : 'badge-receiving';
-                    const downloadAttr = isCompleted ? `href="/uploads/${encodeURIComponent(upload.packet_code)}"` : '';
+                    const downloadOnClick = isCompleted ? `onclick="handleDownload('${upload.packet_code}', ${upload.has_password})"` : '';
                     const downloadClass = isCompleted ? 'download-btn' : 'download-btn disabled';
+                    const lockIcon = upload.has_password ? '<span style="color: var(--warning); margin-left: 4px;" title="File được bảo vệ bằng mật khẩu">🔒</span>' : '';
 
                     html += `
                         <tr>
                             <td>
                                 <div class="file-info">
-                                    <span class="file-name">${upload.file_name}</span>
+                                    <span class="file-name">${upload.file_name}${lockIcon}</span>
                                     <span class="packet-code">Hash ID: ${upload.packet_code}</span>
                                 </div>
                             </td>
@@ -713,9 +727,9 @@ const INDEX_HTML: &str = r#"
                                  </div>
                              </td>
                             <td>
-                                <a ${downloadAttr} class="${downloadClass}" download>
+                                <button ${downloadOnClick} class="${downloadClass}" style="border: none;">
                                     📥 Tải về
-                                </a>
+                                </button>
                             </td>
                         </tr>
                     `;
@@ -724,6 +738,41 @@ const INDEX_HTML: &str = r#"
             } catch (error) {
                 console.error('Error fetching uploads:', error);
             }
+        }
+
+        async function handleDownload(packetCode, hasPassword) {
+            let url = `/uploads/${encodeURIComponent(packetCode)}`;
+            if (hasPassword) {
+                const password = prompt("File này được bảo vệ bằng mật khẩu. Vui lòng nhập mật khẩu:");
+                if (password === null) return; // Hủy bỏ
+                
+                try {
+                    const response = await fetch('/api/verify_password', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ packet_code: packetCode, password: password }),
+                    });
+                    const resData = await response.json();
+                    if (!resData.success) {
+                        alert("Lỗi: " + (resData.error || "Mật khẩu không chính xác"));
+                        return;
+                    }
+                    url += `?password=${encodeURIComponent(password)}`;
+                } catch (err) {
+                    console.error("Lỗi xác thực mật khẩu:", err);
+                    alert("Có lỗi xảy ra khi xác thực mật khẩu.");
+                    return;
+                }
+            }
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         }
 
         // Load data once on page load (manual refresh/F5 will reload)
@@ -815,8 +864,14 @@ impl<S> Drop for DownloadStream<S> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DownloadQuery {
+    pub password: Option<String>,
+}
+
 async fn download_file(
     Path(packet_code): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<DownloadQuery>,
     State(state): State<Arc<RwLock<ServerState>>>,
 ) -> impl IntoResponse {
     // 1. Check if the upload exists and is completed
@@ -828,6 +883,19 @@ async fn download_file(
                     axum::http::StatusCode::BAD_REQUEST,
                     "File chưa hoàn thành tải lên",
                 ).into_response();
+            }
+
+            // Check download password if configured
+            if let Some(ref db_password) = upload.password {
+                if !db_password.is_empty() {
+                    let provided_password = query.password.as_deref().unwrap_or("");
+                    if db_password != provided_password {
+                        return (
+                            axum::http::StatusCode::UNAUTHORIZED,
+                            "Mật khẩu tải xuống không chính xác",
+                        ).into_response();
+                    }
+                }
             }
 
             let file_name_disk = format!("{}.bin", packet_code);
@@ -943,6 +1011,16 @@ async fn register_upload(
         (0, "Đang nhận".to_string(), new_delete_at, None)
     };
 
+    // Use payload password or retain existing password if it was set
+    let password = payload.password.clone().or_else(|| {
+        if let Some(existing) = lock.uploads.get(&payload.packet_code) {
+            existing.password.clone()
+        } else {
+            None
+        }
+    });
+    let has_password = password.is_some() && !password.as_ref().unwrap().is_empty();
+
     let started_at = Utc::now();
     let info = UploadInfo {
         packet_code: payload.packet_code.clone(),
@@ -954,6 +1032,8 @@ async fn register_upload(
         completed_at: if status == "Hoàn thành" { Some(started_at) } else { None },
         delete_at,
         extended_delete_at,
+        has_password,
+        password,
     };
     lock.uploads.insert(payload.packet_code.clone(), info.clone());
 
@@ -1187,6 +1267,8 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     completed_at: None,
                                     delete_at,
                                     extended_delete_at: None,
+                                    has_password: false,
+                                    password: None,
                                 }
                             });
                         };
@@ -1279,6 +1361,34 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct VerifyPasswordRequest {
+    pub packet_code: String,
+    pub password: Option<String>,
+}
+
+async fn verify_password(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    Json(payload): Json<VerifyPasswordRequest>,
+) -> Json<serde_json::Value> {
+    let lock = state.read().await;
+    if let Some(upload) = lock.uploads.get(&payload.packet_code) {
+        if let Some(ref db_password) = upload.password {
+            if !db_password.is_empty() {
+                let provided = payload.password.as_deref().unwrap_or("");
+                if db_password == provided {
+                    return Json(json!({ "success": true }));
+                } else {
+                    return Json(json!({ "success": false, "error": "Mật khẩu không chính xác" }));
+                }
+            }
+        }
+        Json(json!({ "success": true }))
+    } else {
+        Json(json!({ "success": false, "error": "Mã hash file không tồn tại" }))
+    }
+}
+
 async fn log_request(
     State(state): State<Arc<RwLock<ServerState>>>,
     req: axum::extract::Request,
@@ -1357,6 +1467,7 @@ async fn main() {
         .route("/", get(index_handler))
         .route("/api/register", post(register_upload))
         .route("/api/list", get(list_uploads))
+        .route("/api/verify_password", post(verify_password))
         .route("/uploads/:packet_code", get(download_file))
         .layer(axum::middleware::from_fn_with_state(state.clone(), log_request))
         .layer(CorsLayer::permissive())
