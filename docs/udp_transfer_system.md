@@ -273,3 +273,14 @@ Hệ thống đã triển khai các nâng cấp quan trọng để tăng cườn
 ### 5.5. Tối ưu hóa Dashboard Tiết Kiệm Tài Nguyên
 *   **Hiển thị thời gian:** Loại bỏ hiển thị phần giây ở tất cả các trường thời gian và mốc tự hủy (đếm ngược chỉ hiển thị ở mức độ phút, ví dụ: `Tự hủy: 10:20 (còn 2 phút)`).
 *   **Cập nhật dữ liệu:** Loại bỏ cơ chế cập nhật tự động bằng vòng lặp `setInterval`. Dashboard chỉ truy vấn API một lần duy nhất lúc tải trang. Việc cập nhật danh sách hoàn toàn phụ thuộc vào việc tải lại trang thủ công hoặc bấm F5 của người dùng, giúp giảm tối đa tải CPU/RAM cho cả client và server.
+
+### 5.6. Tránh Xóa Tệp Khi Đang Tải Về (Download Retention Delay)
+*   **Vấn đề:** Nếu một tệp đến thời hạn tự hủy (`delete_at`) nhưng tại thời điểm đó vẫn đang có các phiên tải về (download) hoạt động, việc xóa tệp ngay lập tức sẽ làm gián đoạn việc tải của người dùng.
+*   **Giải pháp:**
+    1.  Hệ thống duy trì một bộ đếm số lượt tải xuống đồng thời trong bộ nhớ (`active_downloads`).
+    2.  Khi bộ quét dọn dẹp chạy qua, nếu thấy tệp đã quá hạn tự hủy nhưng số lượt tải hoạt động $> 0$:
+        *   Nếu chưa được gia hạn, hệ thống sẽ gia hạn thời gian xóa: `extended_delete_at = delete_at + completed_timeout`.
+        *   Thông tin thời gian gia hạn được đồng bộ xuống cơ sở dữ liệu SQLite và hiển thị rõ ràng trên giao diện Dashboard dưới dạng: `Tự hủy (gia hạn): HH:MM (còn X phút)` với viền đứt nét màu đỏ.
+    3.  Sau khi thời gian gia hạn này trôi qua, tệp sẽ bị xóa bất kể lượt tải hoạt động có còn hay không (để đảm bảo tính an toàn và giải phóng tài nguyên).
+    4.  Nếu các lượt tải hoạt động kết thúc sớm hơn (số lượt tải trở về `0`) và thời gian hiện tại đã vượt quá thời gian tự hủy gốc `delete_at`, tệp sẽ được tự động xóa ngay lập tức mà không cần đợi thời gian gia hạn kết thúc hoặc đợi chu kỳ quét tiếp theo.
+

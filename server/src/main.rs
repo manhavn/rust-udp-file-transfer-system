@@ -24,6 +24,7 @@ pub struct UploadInfo {
     pub started_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
     pub delete_at: Option<DateTime<Utc>>,
+    pub extended_delete_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -61,6 +62,7 @@ pub struct Args {
 
 pub struct ServerState {
     pub uploads: HashMap<String, UploadInfo>,
+    pub active_downloads: HashMap<String, usize>,
     pub upload_dir: String,
     pub db_path: String,
     pub cleanup_interval: u64,
@@ -80,23 +82,26 @@ fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
             status TEXT NOT NULL,
             started_at TEXT NOT NULL,
             completed_at TEXT,
-            delete_at TEXT
+            delete_at TEXT,
+            extended_delete_at TEXT
         )",
         [],
     )?;
-    // Attempt migration for existing databases missing the delete_at column
+    // Attempt migration for existing databases missing the delete_at or extended_delete_at column
     let _ = conn.execute("ALTER TABLE uploads ADD COLUMN delete_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE uploads ADD COLUMN extended_delete_at TEXT", []);
     Ok(())
 }
 
 fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
-    let mut stmt = conn.prepare("SELECT packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at FROM uploads")?;
+    let mut stmt = conn.prepare("SELECT packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at, extended_delete_at FROM uploads")?;
     let upload_iter = stmt.query_map([], |row| {
         let started_at_str: String = row.get(5)?;
         let completed_at_str: Option<String> = row.get(6)?;
         let delete_at_str: Option<String> = row.get(7)?;
+        let extended_delete_at_str: Option<String> = row.get(8)?;
 
         let started_at = DateTime::parse_from_rfc3339(&started_at_str)
             .map(|dt| dt.with_timezone(&Utc))
@@ -114,6 +119,12 @@ fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, ru
                 .ok()
         });
 
+        let extended_delete_at = extended_delete_at_str.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok()
+        });
+
         Ok(UploadInfo {
             packet_code: row.get(0)?,
             file_name: row.get(1)?,
@@ -123,6 +134,7 @@ fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, ru
             started_at,
             completed_at,
             delete_at,
+            extended_delete_at,
         })
     })?;
 
@@ -138,8 +150,8 @@ fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::E
     let conn = rusqlite::Connection::open(db_path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute(
-        "INSERT INTO uploads (packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO uploads (packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at, extended_delete_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(packet_code) DO UPDATE SET
             file_name = excluded.file_name,
             file_size = excluded.file_size,
@@ -147,7 +159,8 @@ fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::E
             status = excluded.status,
             started_at = excluded.started_at,
             completed_at = excluded.completed_at,
-            delete_at = excluded.delete_at",
+            delete_at = excluded.delete_at,
+            extended_delete_at = excluded.extended_delete_at",
         rusqlite::params![
             info.packet_code,
             info.file_name,
@@ -157,6 +170,7 @@ fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::E
             info.started_at.to_rfc3339(),
             info.completed_at.map(|dt| dt.to_rfc3339()),
             info.delete_at.map(|dt| dt.to_rfc3339()),
+            info.extended_delete_at.map(|dt| dt.to_rfc3339()),
         ],
     )?;
     Ok(())
@@ -608,18 +622,24 @@ const INDEX_HTML: &str = r#"
             return `${diffMins} phút`;
         }
 
-        function formatDeleteAt(deleteAtStr) {
+        function formatDeleteAt(deleteAtStr, extendedDeleteAtStr) {
             if (!deleteAtStr) return '';
             const deleteAt = new Date(deleteAtStr);
+            const extendedDeleteAt = extendedDeleteAtStr ? new Date(extendedDeleteAtStr) : null;
             const now = new Date();
-            const diffMs = deleteAt - now;
+            
+            const targetDelete = extendedDeleteAt || deleteAt;
+            const diffMs = targetDelete - now;
             const diffMins = Math.ceil(diffMs / (1000 * 60));
             
             if (diffMins <= 0) {
                 return `<span style="font-size: 0.82rem; color: var(--warning)">Đang xóa...</span>`;
             }
             
-            const timeStr = deleteAt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+            const timeStr = targetDelete.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+            if (extendedDeleteAt) {
+                return `<span style="font-size: 0.82rem; color: #f43f5e; font-weight: 500; border: 1px dashed #f43f5e; padding: 2px 4px; border-radius: 4px; display: inline-block; margin-top: 4px;">Tự hủy (gia hạn): ${timeStr} (còn ${diffMins} phút)</span>`;
+            }
             return `<span style="font-size: 0.82rem; color: #f43f5e; font-weight: 500;">Tự hủy: ${timeStr} (còn ${diffMins} phút)</span>`;
         }
 
@@ -684,7 +704,7 @@ const INDEX_HTML: &str = r#"
                                      <span style="font-size: 0.85rem; color: var(--text-muted)">Bắt đầu: ${formatDateTime(upload.started_at)}</span>
                                      ${upload.completed_at ? `<span style="font-size: 0.85rem; color: var(--success); font-weight: 500;">Kết thúc: ${formatDateTime(upload.completed_at)}</span>` : ''}
                                      <span style="font-size: 0.85rem; color: var(--text-muted)">Thời gian truyền: ${calculateDuration(upload.started_at, upload.completed_at)}</span>
-                                     ${formatDeleteAt(upload.delete_at)}
+                                     ${formatDeleteAt(upload.delete_at, upload.extended_delete_at)}
                                  </div>
                              </td>
                             <td>
@@ -708,59 +728,162 @@ const INDEX_HTML: &str = r#"
 </html>
 "#;
 
+struct DownloadStream<S> {
+    inner: S,
+    packet_code: String,
+    state: Arc<tokio::sync::RwLock<ServerState>>,
+}
+
+impl<S: futures_util::stream::Stream + Unpin> futures_util::stream::Stream for DownloadStream<S> {
+    type Item = S::Item;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<S::Item>> {
+        std::pin::Pin::new(&mut self.inner).poll_next(cx)
+    }
+}
+
+impl<S> Drop for DownloadStream<S> {
+    fn drop(&mut self) {
+        let state = self.state.clone();
+        let packet_code = self.packet_code.clone();
+        tokio::spawn(async move {
+            let mut lock = state.write().await;
+            let current_count = if let Some(count) = lock.active_downloads.get_mut(&packet_code) {
+                if *count > 0 {
+                    *count -= 1;
+                }
+                *count
+            } else {
+                0
+            };
+            
+            println!("[HTTP] Download completed or disconnected for {}. Active downloads: {}", packet_code, current_count);
+            
+            if current_count == 0 {
+                lock.active_downloads.remove(&packet_code);
+                
+                let mut should_delete = false;
+                let mut file_name = String::new();
+                let mut is_completed = false;
+                if let Some(upload) = lock.uploads.get(&packet_code) {
+                    if let Some(delete_at) = upload.delete_at {
+                        if Utc::now() >= delete_at {
+                            should_delete = true;
+                            file_name = upload.file_name.clone();
+                            is_completed = upload.status == "Hoàn thành";
+                        }
+                    }
+                }
+                if should_delete {
+                    lock.uploads.remove(&packet_code);
+                    let file_name_disk = format!("{}.bin", packet_code);
+                    let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
+                    let _ = std::fs::remove_file(&file_path);
+                    
+                    let db_path = lock.db_path.clone();
+                    let code_clone = packet_code.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                            let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+                            let _ = conn.execute(
+                                "DELETE FROM uploads WHERE packet_code = ?1",
+                                rusqlite::params![code_clone],
+                            );
+                        }
+                    }).await;
+                    let type_str = if is_completed { "completed" } else { "incomplete" };
+                    println!(
+                        "[HTTP Drop Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
+                        type_str, packet_code, file_name
+                    );
+                }
+            }
+        });
+    }
+}
+
 async fn download_file(
     Path(packet_code): Path<String>,
     State(state): State<Arc<RwLock<ServerState>>>,
 ) -> impl IntoResponse {
-    let lock = state.read().await;
-    if let Some(upload) = lock.uploads.get(&packet_code) {
-        if upload.status != "Hoàn thành" {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                "File chưa hoàn thành tải lên",
-            ).into_response();
-        }
+    // 1. Check if the upload exists and is completed
+    let (file_name, file_path) = {
+        let lock = state.read().await;
+        if let Some(upload) = lock.uploads.get(&packet_code) {
+            if upload.status != "Hoàn thành" {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "File chưa hoàn thành tải lên",
+                ).into_response();
+            }
 
-        let file_name_disk = format!("{}.bin", packet_code);
-        let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
-        if !file_path.exists() {
+            let file_name_disk = format!("{}.bin", packet_code);
+            let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
+            if !file_path.exists() {
+                return (
+                    axum::http::StatusCode::NOT_FOUND,
+                    "File vật lý không tồn tại trên server",
+                ).into_response();
+            }
+            (upload.file_name.clone(), file_path)
+        } else {
             return (
                 axum::http::StatusCode::NOT_FOUND,
-                "File vật lý không tồn tại trên server",
+                "Mã gói tin không tồn tại",
             ).into_response();
         }
+    };
 
-        // Guess MIME type or use application/octet-stream
-        let mime = mime_guess::from_path(&upload.file_name)
-            .first_or_octet_stream()
-            .to_string();
+    // 2. Increment active downloads counter
+    {
+        let mut lock = state.write().await;
+        let count = lock.active_downloads.entry(packet_code.clone()).or_insert(0);
+        *count += 1;
+        println!("[HTTP] Starting download for {}. Active downloads: {}", packet_code, *count);
+    }
 
-        // Open file and read stream
-        match tokio::fs::File::open(&file_path).await {
-            Ok(file) => {
-                let stream = tokio_util::io::ReaderStream::new(file);
-                let body = axum::body::Body::from_stream(stream);
+    // Guess MIME type or use application/octet-stream
+    let mime = mime_guess::from_path(&file_name)
+        .first_or_octet_stream()
+        .to_string();
 
-                let headers = [
-                    (axum::http::header::CONTENT_TYPE, mime),
-                    (
-                        axum::http::header::CONTENT_DISPOSITION,
-                        format!("attachment; filename=\"{}\"", upload.file_name),
-                    ),
-                ];
+    // Open file and read stream
+    match tokio::fs::File::open(&file_path).await {
+        Ok(file) => {
+            let stream = tokio_util::io::ReaderStream::new(file);
+            let wrapped_stream = DownloadStream {
+                inner: stream,
+                packet_code: packet_code.clone(),
+                state: state.clone(),
+            };
+            let body = axum::body::Body::from_stream(wrapped_stream);
 
-                (headers, body).into_response()
+            let headers = [
+                (axum::http::header::CONTENT_TYPE, mime),
+                (
+                    axum::http::header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"{}\"", file_name),
+                ),
+            ];
+
+            (headers, body).into_response()
+        }
+        Err(_) => {
+            // Decrement active downloads counter on error opening file
+            let mut lock = state.write().await;
+            if let Some(count) = lock.active_downloads.get_mut(&packet_code) {
+                if *count > 0 {
+                    *count -= 1;
+                }
             }
-            Err(_) => (
+            (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Không thể mở file",
-            ).into_response(),
+            ).into_response()
         }
-    } else {
-        (
-            axum::http::StatusCode::NOT_FOUND,
-            "Mã gói tin không tồn tại",
-        ).into_response()
     }
 }
 
@@ -787,7 +910,7 @@ async fn register_upload(
     let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
     
     // Check if the upload already exists and determine the safe resume offset
-    let (bytes_received, status, delete_at) = if let Some(existing) = lock.uploads.get(&payload.packet_code) {
+    let (bytes_received, status, delete_at, extended_delete_at) = if let Some(existing) = lock.uploads.get(&payload.packet_code) {
         let disk_size = if file_path.exists() {
             file_path.metadata().map(|m| m.len()).unwrap_or(0)
         } else {
@@ -800,10 +923,10 @@ async fn register_upload(
         } else {
             Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins))
         };
-        (resume_offset, existing.status.clone(), new_delete_at)
+        (resume_offset, existing.status.clone(), new_delete_at, existing.extended_delete_at)
     } else {
         let new_delete_at = Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins));
-        (0, "Đang nhận".to_string(), new_delete_at)
+        (0, "Đang nhận".to_string(), new_delete_at, None)
     };
 
     let started_at = Utc::now();
@@ -816,6 +939,7 @@ async fn register_upload(
         started_at,
         completed_at: if status == "Hoàn thành" { Some(started_at) } else { None },
         delete_at,
+        extended_delete_at,
     };
     lock.uploads.insert(payload.packet_code.clone(), info.clone());
 
@@ -868,16 +992,64 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
         // Run checks based on the configured cleanup interval
         tokio::time::sleep(tokio::time::Duration::from_secs(interval_mins * 60)).await;
         let now = Utc::now();
+        println!("[Cleanup Scan] Running scan at {}", now.to_rfc3339());
         let mut to_delete = Vec::new();
+        let mut updates_to_save = Vec::new();
 
         {
             let lock = state.read().await;
+            let completed_timeout = lock.completed_timeout_mins;
             for (code, upload) in &lock.uploads {
+                let active_count = lock.active_downloads.get(code).copied().unwrap_or(0);
+                println!(
+                    "[Cleanup Debug] Checked {} (status: {}) - active downloads: {}, delete_at: {:?}, extended_delete_at: {:?}",
+                    upload.file_name, upload.status, active_count,
+                    upload.delete_at.map(|dt| dt.to_rfc3339()),
+                    upload.extended_delete_at.map(|dt| dt.to_rfc3339())
+                );
                 if let Some(delete_at) = upload.delete_at {
                     if now >= delete_at {
-                        to_delete.push((code.clone(), upload.file_name.clone(), upload.status == "Hoàn thành"));
+                        if active_count > 0 {
+                            // If not extended yet, extend it
+                            if upload.extended_delete_at.is_none() {
+                                let new_ext = delete_at + chrono::Duration::minutes(completed_timeout);
+                                updates_to_save.push((code.clone(), new_ext));
+                                println!(
+                                    "[Cleanup] File {} has active downloads ({}). Delaying deletion. New extended_delete_at: {}",
+                                    upload.file_name, active_count, new_ext
+                                );
+                            } else if let Some(ext_time) = upload.extended_delete_at {
+                                // Already extended, delete if extended time reached
+                                if now >= ext_time {
+                                    to_delete.push((code.clone(), upload.file_name.clone(), upload.status == "Hoàn thành"));
+                                }
+                            }
+                        } else {
+                            // No active downloads
+                            to_delete.push((code.clone(), upload.file_name.clone(), upload.status == "Hoàn thành"));
+                        }
                     }
                 }
+            }
+        }
+
+        // Apply extensions to state and database
+        for (code, ext_time) in updates_to_save {
+            let mut lock = state.write().await;
+            let db_path = lock.db_path.clone();
+            if let Some(upload) = lock.uploads.get_mut(&code) {
+                upload.extended_delete_at = Some(ext_time);
+
+                // Save to SQLite
+                tokio::task::spawn_blocking(move || {
+                    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+                        let _ = conn.execute(
+                            "UPDATE uploads SET extended_delete_at = ?1 WHERE packet_code = ?2",
+                            rusqlite::params![ext_time.to_rfc3339(), code],
+                        );
+                    }
+                });
             }
         }
 
@@ -962,6 +1134,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     started_at: Utc::now(),
                                     completed_at: None,
                                     delete_at,
+                                    extended_delete_at: None,
                                 }
                             });
                         };
@@ -1075,6 +1248,7 @@ async fn main() {
 
     let state = Arc::new(RwLock::new(ServerState {
         uploads,
+        active_downloads: HashMap::new(),
         upload_dir: upload_dir.clone(),
         db_path,
         cleanup_interval: args.cleanup_interval,
