@@ -45,6 +45,13 @@ fi
 # Tạo thư mục lưu trữ cục bộ nếu chưa có
 mkdir -p uploads db
 
+# Dừng và xóa container cũ nếu tồn tại để tránh xung đột tên rtk-server
+if podman ps -a --format '{{.Names}}' | grep -Eq "^rtk-server$"; then
+    echo "==> Phát hiện container 'rtk-server' cũ đang chạy. Đang dừng và xóa..."
+    podman stop rtk-server >/dev/null 2>&1 || true
+    podman rm rtk-server >/dev/null 2>&1 || true
+fi
+
 echo "=========================================================="
 echo "Khởi chạy RTK UDP Server qua Podman..."
 echo "=========================================================="
