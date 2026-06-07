@@ -1388,10 +1388,12 @@ dependencies = [
  "chrono",
  "clap",
  "common",
+ "mime_guess",
  "rusqlite",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tower-http 0.5.2",
 ]
 

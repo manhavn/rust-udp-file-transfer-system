@@ -7,12 +7,11 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use axum::{
     routing::{get, post},
-    extract::State,
-    response::Html,
+    extract::{State, Path},
+    response::{Html, IntoResponse},
     Json, Router,
 };
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
 use serde_json::json;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +70,7 @@ pub struct ServerState {
 
 fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS uploads (
             packet_code TEXT PRIMARY KEY,
@@ -91,6 +91,7 @@ fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
 
 fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let mut stmt = conn.prepare("SELECT packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at FROM uploads")?;
     let upload_iter = stmt.query_map([], |row| {
         let started_at_str: String = row.get(5)?;
@@ -135,6 +136,7 @@ fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, ru
 
 fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute(
         "INSERT INTO uploads (packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -652,7 +654,7 @@ const INDEX_HTML: &str = r#"
 
                     const isCompleted = upload.status === 'Hoàn thành';
                     const statusClass = isCompleted ? 'badge-completed' : 'badge-receiving';
-                    const downloadAttr = isCompleted ? `href="/uploads/${encodeURIComponent(upload.file_name)}"` : '';
+                    const downloadAttr = isCompleted ? `href="/uploads/${encodeURIComponent(upload.packet_code)}"` : '';
                     const downloadClass = isCompleted ? 'download-btn' : 'download-btn disabled';
 
                     html += `
@@ -706,6 +708,62 @@ const INDEX_HTML: &str = r#"
 </html>
 "#;
 
+async fn download_file(
+    Path(packet_code): Path<String>,
+    State(state): State<Arc<RwLock<ServerState>>>,
+) -> impl IntoResponse {
+    let lock = state.read().await;
+    if let Some(upload) = lock.uploads.get(&packet_code) {
+        if upload.status != "Hoàn thành" {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                "File chưa hoàn thành tải lên",
+            ).into_response();
+        }
+
+        let file_name_disk = format!("{}.bin", packet_code);
+        let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
+        if !file_path.exists() {
+            return (
+                axum::http::StatusCode::NOT_FOUND,
+                "File vật lý không tồn tại trên server",
+            ).into_response();
+        }
+
+        // Guess MIME type or use application/octet-stream
+        let mime = mime_guess::from_path(&upload.file_name)
+            .first_or_octet_stream()
+            .to_string();
+
+        // Open file and read stream
+        match tokio::fs::File::open(&file_path).await {
+            Ok(file) => {
+                let stream = tokio_util::io::ReaderStream::new(file);
+                let body = axum::body::Body::from_stream(stream);
+
+                let headers = [
+                    (axum::http::header::CONTENT_TYPE, mime),
+                    (
+                        axum::http::header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{}\"", upload.file_name),
+                    ),
+                ];
+
+                (headers, body).into_response()
+            }
+            Err(_) => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Không thể mở file",
+            ).into_response(),
+        }
+    } else {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            "Mã gói tin không tồn tại",
+        ).into_response()
+    }
+}
+
 async fn index_handler() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
@@ -725,7 +783,8 @@ async fn register_upload(
     Json(payload): Json<RegisterRequest>,
 ) -> Json<serde_json::Value> {
     let mut lock = state.write().await;
-    let file_path = std::path::Path::new(&lock.upload_dir).join(&payload.file_name);
+    let file_name_disk = format!("{}.bin", payload.packet_code);
+    let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
     
     // Check if the upload already exists and determine the safe resume offset
     let (bytes_received, status, delete_at) = if let Some(existing) = lock.uploads.get(&payload.packet_code) {
@@ -826,13 +885,15 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
             let mut lock = state.write().await;
             lock.uploads.remove(&code);
 
-            let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name);
+            let file_name_disk = format!("{}.bin", code);
+            let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
             let _ = std::fs::remove_file(&file_path);
 
             let db_path = lock.db_path.clone();
             let code_clone = code.clone();
             let _ = tokio::task::spawn_blocking(move || {
                 if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
                     let _ = conn.execute(
                         "DELETE FROM uploads WHERE packet_code = ?1",
                         rusqlite::params![code_clone],
@@ -874,14 +935,15 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                         let unique_id = common::bytes_to_unique_id(packet.packet_code);
                         let is_end = packet.status == 0;
 
-                         let file_name = {
+                         {
                             let mut lock = state.write().await;
                             let incomplete_timeout = lock.incomplete_timeout_mins;
                             let completed_timeout = lock.completed_timeout_mins;
                             let upload_dir = lock.upload_dir.clone();
-                            let entry = lock.uploads.entry(unique_id.clone()).or_insert_with(|| {
-                                let name = format!("upload_{}.bin", unique_id);
-                                let file_path = std::path::Path::new(&upload_dir).join(&name);
+                            lock.uploads.entry(unique_id.clone()).or_insert_with(|| {
+                                let name = format!("{}.bin", unique_id);
+                                let file_name_disk = format!("{}.bin", unique_id);
+                                let file_path = std::path::Path::new(&upload_dir).join(&file_name_disk);
                                 if let Some(parent) = file_path.parent() {
                                     let _ = std::fs::create_dir_all(parent);
                                 }
@@ -902,12 +964,12 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     delete_at,
                                 }
                             });
-                            entry.file_name.clone()
                         };
 
                         let mut write_success = is_end; // End packet has no data, treated as success
                         if !is_end && !packet.data.is_empty() {
-                            let file_path = std::path::Path::new(&state.read().await.upload_dir).join(&file_name);
+                            let file_name_disk = format!("{}.bin", unique_id);
+                            let file_path = std::path::Path::new(&state.read().await.upload_dir).join(&file_name_disk);
                             let seek_begin = packet.seek_begin;
                             let data = packet.data.to_vec();
 
@@ -1038,7 +1100,7 @@ async fn main() {
         .route("/", get(index_handler))
         .route("/api/register", post(register_upload))
         .route("/api/list", get(list_uploads))
-        .nest_service("/uploads", ServeDir::new(&upload_dir))
+        .route("/uploads/:packet_code", get(download_file))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
