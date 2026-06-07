@@ -3,20 +3,20 @@
 
 # Xác định vị trí file tar server
 if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
-    echo "Sử dụng: $0 [các tham số cấu hình...]"
+    echo "Sử dụng: [Cấu hình ENV] $0"
     echo ""
-    echo "Các tham số cấu hình hỗ trợ:"
-    echo "  --udp-port <port>          Cổng UDP lắng nghe (mặc định: 5000)"
-    echo "  --http-port <port>         Cổng HTTP REST API & Dashboard (mặc định: 8080)"
-    echo "  --upload-dir <dir>         Thư mục chứa các tệp tải lên (mặc định: ./uploads)"
-    echo "  --db-path <path>           Đường dẫn cơ sở dữ liệu SQLite (mặc định: ./db/data.sqlite)"
-    echo "  --cleanup-interval <min>   Chu kỳ quét dọn dẹp tệp tin (mặc định: 5 phút)"
-    echo "  --incomplete-timeout <min> Thời gian lưu trữ tệp chưa xong (mặc định: 60 phút)"
-    echo "  --completed-timeout <min>  Thời gian lưu trữ tệp đã xong (mặc định: 15 phút)"
-    echo "  --disable-request-log      Tắt logs HTTP/UDP"
+    echo "Các biến môi trường cấu hình hỗ trợ trên máy Host:"
+    echo "  UDP_PORT             Cổng UDP lắng nghe (mặc định: 5000)"
+    echo "  HTTP_PORT            Cổng HTTP REST API & Dashboard (mặc định: 8080)"
+    echo "  UPLOAD_DIR           Thư mục chứa các tệp tải lên (mặc định: ./uploads)"
+    echo "  DB_PATH              Đường dẫn cơ sở dữ liệu SQLite (mặc định: ./db/data.sqlite)"
+    echo "  CLEANUP_INTERVAL     Chu kỳ quét dọn dẹp tệp tin tính bằng phút (mặc định: 5)"
+    echo "  INCOMPLETE_TIMEOUT   Thời gian lưu trữ tệp chưa xong tính bằng phút (mặc định: 60)"
+    echo "  COMPLETED_TIMEOUT    Thời gian lưu trữ tệp đã xong tính bằng phút (mặc định: 15)"
+    echo "  DISABLE_REQUEST_LOG  Tắt logs HTTP/UDP (true/false, mặc định: false)"
     echo ""
     echo "Ví dụ chạy tùy biến cổng:"
-    echo "  $0 --udp-port 5005 --http-port 8085"
+    echo "  UDP_PORT=5005 HTTP_PORT=8085 $0"
     exit 0
 fi
 
@@ -46,11 +46,22 @@ echo "=========================================================="
 echo "Khởi chạy RTK UDP Server qua Podman..."
 echo "=========================================================="
 
-# Chạy Server Container với nhãn bảo mật :Z cho SELinux
+HOST_UDP_PORT=${UDP_PORT:-5000}
+HOST_HTTP_PORT=${HTTP_PORT:-8080}
+
+# Chạy Server Container với nhãn bảo mật :Z cho SELinux hoàn toàn bằng biến môi trường
 podman run -d \
   --name rtk-server \
-  -p 5000:5000/udp \
-  -p 8080:8080/tcp \
+  -p "$HOST_UDP_PORT:$HOST_UDP_PORT/udp" \
+  -p "$HOST_HTTP_PORT:$HOST_HTTP_PORT/tcp" \
+  -e UDP_PORT="$HOST_UDP_PORT" \
+  -e HTTP_PORT="$HOST_HTTP_PORT" \
+  ${UPLOAD_DIR:+-e UPLOAD_DIR="$UPLOAD_DIR"} \
+  ${DB_PATH:+-e DB_PATH="$DB_PATH"} \
+  ${CLEANUP_INTERVAL:+-e CLEANUP_INTERVAL="$CLEANUP_INTERVAL"} \
+  ${INCOMPLETE_TIMEOUT:+-e INCOMPLETE_TIMEOUT="$INCOMPLETE_TIMEOUT"} \
+  ${COMPLETED_TIMEOUT:+-e COMPLETED_TIMEOUT="$COMPLETED_TIMEOUT"} \
+  ${DISABLE_REQUEST_LOG:+-e DISABLE_REQUEST_LOG="$DISABLE_REQUEST_LOG"} \
   -v "$(pwd)/uploads:/app/uploads:Z" \
   -v "$(pwd)/db:/app/db:Z" \
-  rtk.udp/server "$@"
+  rtk.udp/server
