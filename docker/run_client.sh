@@ -1,9 +1,22 @@
 #!/bin/bash
 # Script khởi chạy Client bằng Docker (nạp tự động từ file .tar và mount file upload)
 
-if [ -z "$1" ]; then
+if [ -z "$1" ] || [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     echo "Sử dụng: $0 <đường_dẫn_file> [các tham số khác...]"
-    echo "Ví dụ: $0 video.mp4 --server-ip 192.168.1.100"
+    echo ""
+    echo "Các tham số cấu hình hỗ trợ:"
+    echo "  --server-ip <ip>      Địa chỉ IP của Server (mặc định: 127.0.0.1)"
+    echo "  --udp-port <port>     Cổng UDP của Server (mặc định: 5000)"
+    echo "  --http-port <port>    Cổng HTTP của Server (mặc định: 8080)"
+    echo "  --block-size <bytes>  Kích thước khối dữ liệu UDP gửi đi (mặc định: 16384)"
+    echo "  --log-progress        Hiển thị tiến trình upload dạng log dòng mới"
+    echo "  --password <password> Mật khẩu bảo mật tải xuống file (mặc định: không có)"
+    echo ""
+    echo "Ví dụ gửi file không mật khẩu:"
+    echo "  $0 video.mp4 --server-ip 192.168.1.100"
+    echo ""
+    echo "Ví dụ gửi file có mật khẩu:"
+    echo "  $0 video.mp4 --server-ip 192.168.1.100 --password mysecret123"
     exit 1
 fi
 
