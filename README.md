@@ -118,6 +118,36 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
 
 ---
 
+### 4.3. Chạy ở môi trường Production (Production Run Scripts)
+Để chạy các file thực thi đã biên dịch Release trực tiếp ở thư mục gốc (hoặc khi triển khai độc lập lên máy chủ), bạn có thể sử dụng các kịch bản chạy sau:
+
+*   **Khởi chạy Server:**
+    *   **Linux/macOS:**
+        ```bash
+        ./run_server.sh [các tham số cấu hình...]
+        # Ví dụ:
+        ./run_server.sh --cleanup-interval 5 --completed-timeout 25
+        ```
+    *   **Windows:**
+        ```batch
+        run_server.bat [các tham số cấu hình...]
+        ```
+*   **Khởi chạy Client CLI (Gửi file):**
+    *   **Linux/macOS:**
+        ```bash
+        ./run_client.sh <đường_dẫn_file> [ip_server] [cổng_udp] [cổng_http]
+        # Ví dụ:
+        ./run_client.sh video.mp4 127.0.0.1 5000 8080
+        ```
+    *   **Windows:**
+        ```batch
+        run_client.bat <đường_dẫn_file> [ip_server] [cổng_udp] [cổng_http]
+        ```
+
+Các kịch bản này tự động phát hiện đường dẫn tệp thực thi release (trong thư mục `target/release/` hoặc cùng thư mục hiện tại nếu tệp chạy được sao chép độc lập), tự động tạo các thư mục cần thiết (`uploads/` và `db/`), rồi khởi chạy chương trình với đầy đủ tham số.
+
+---
+
 ## 5. Chạy Demo Nhanh (Quick Start)
 Để kiểm tra nhanh toàn bộ hệ thống (biên dịch, tạo tệp kiểm thử 1MB, chạy server ngầm và upload dữ liệu tự động), chạy lệnh:
 ```bash
