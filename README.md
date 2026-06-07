@@ -77,6 +77,7 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
 *   `--completed-timeout`: Thời gian tối đa lưu giữ tệp đã hoàn thành (đơn vị: phút).
 *   `--udp-port`: Cổng UDP để nhận dữ liệu.
 *   `--http-port`: Cổng HTTP chạy dashboard REST API.
+*   `--disable-request-log`: Tắt toàn bộ output log request của HTTP server (mặc định server sẽ bật log cho mỗi request).
 
 **Ví dụ chạy Server (Quét dọn dẹp mỗi 3 phút, lưu tệp dở dang tối đa 30 phút, lưu tệp hoàn thành tối đa 20 phút):**
 *   **Linux:**

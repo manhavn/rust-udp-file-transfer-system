@@ -58,6 +58,10 @@ pub struct Args {
     /// Thời gian tối đa lưu trữ tệp đã hoàn thành (phút)
     #[arg(long, default_value_t = 15)]
     pub completed_timeout: i64,
+
+    /// Tắt toàn bộ output log request của HTTP server
+    #[arg(long, default_value_t = false)]
+    pub disable_request_log: bool,
 }
 
 pub struct ServerState {
@@ -68,6 +72,7 @@ pub struct ServerState {
     pub cleanup_interval: u64,
     pub incomplete_timeout_mins: i64,
     pub completed_timeout_mins: i64,
+    pub disable_request_log: bool,
 }
 
 fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
@@ -760,7 +765,10 @@ impl<S> Drop for DownloadStream<S> {
                 0
             };
             
-            println!("[HTTP] Download completed or disconnected for {}. Active downloads: {}", packet_code, current_count);
+            let disable_log = lock.disable_request_log;
+            if !disable_log {
+                println!("[HTTP] Download completed or disconnected for {}. Active downloads: {}", packet_code, current_count);
+            }
             
             if current_count == 0 {
                 lock.active_downloads.remove(&packet_code);
@@ -794,11 +802,13 @@ impl<S> Drop for DownloadStream<S> {
                             );
                         }
                     }).await;
-                    let type_str = if is_completed { "completed" } else { "incomplete" };
-                    println!(
-                        "[HTTP Drop Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
-                        type_str, packet_code, file_name
-                    );
+                    if !disable_log {
+                        let type_str = if is_completed { "completed" } else { "incomplete" };
+                        println!(
+                            "[HTTP Drop Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
+                            type_str, packet_code, file_name
+                        );
+                    }
                 }
             }
         });
@@ -840,9 +850,13 @@ async fn download_file(
     // 2. Increment active downloads counter
     {
         let mut lock = state.write().await;
+        let disable_log = lock.disable_request_log;
         let count = lock.active_downloads.entry(packet_code.clone()).or_insert(0);
         *count += 1;
-        println!("[HTTP] Starting download for {}. Active downloads: {}", packet_code, *count);
+        let current_count = *count;
+        if !disable_log {
+            println!("[HTTP] Starting download for {}. Active downloads: {}", packet_code, current_count);
+        }
     }
 
     // Guess MIME type or use application/octet-stream
@@ -972,8 +986,10 @@ async fn register_upload(
         }
     }
     
-    println!("[HTTP] Registered upload. File: {}, Size: {}, Hash ID: {}, Resume Offset: {}", 
-             payload.file_name, payload.file_size, payload.packet_code, bytes_received);
+    if !lock.disable_request_log {
+        println!("[HTTP] Registered upload. File: {}, Size: {}, Hash ID: {}, Resume Offset: {}", 
+                 payload.file_name, payload.file_size, payload.packet_code, bytes_received);
+    }
 
     Json(json!({
         "status": "registered",
@@ -1218,6 +1234,26 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
     }
 }
 
+async fn log_request(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> impl IntoResponse {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    
+    let disable_log = {
+        let lock = state.read().await;
+        lock.disable_request_log
+    };
+    
+    if !disable_log {
+        println!("[HTTP] Request: {} {}", method, path);
+    }
+    
+    next.run(req).await
+}
+
 #[tokio::main]
 async fn main() {
     // Parse command line arguments
@@ -1232,6 +1268,7 @@ async fn main() {
     let _ = std::fs::create_dir_all(db_dir);
     if let Err(e) = init_db(&db_path) {
         eprintln!("[DB] Failed to initialize SQLite database: {}", e);
+        std::process::exit(1);
     }
 
     // Load existing uploads from SQLite
@@ -1254,6 +1291,7 @@ async fn main() {
         cleanup_interval: args.cleanup_interval,
         incomplete_timeout_mins: args.incomplete_timeout,
         completed_timeout_mins: args.completed_timeout,
+        disable_request_log: args.disable_request_log,
     }));
 
     // Start UDP Server Task
@@ -1275,6 +1313,7 @@ async fn main() {
         .route("/api/register", post(register_upload))
         .route("/api/list", get(list_uploads))
         .route("/uploads/:packet_code", get(download_file))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), log_request))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
