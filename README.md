@@ -218,20 +218,20 @@ Bạn có thể build tự động qua script (khuyên dùng) hoặc build thủ
     ./build_container.sh
     ```
 
-*   **Cách 2: Biên dịch thủ công (Nếu đã tự tạo base images `rtk-builder-base:latest` và `rtk-runtime-base:latest` trước đó):**
-    *   **Xây dựng Server Image (`rtk-udp-server`):**
+*   **Cách 2: Biên dịch thủ công (Nếu đã tự tạo base images `rtk.builder/base:latest` và `rtk.runtime/base:latest` trước đó):**
+    *   **Xây dựng Server Image (`rtk.udp/server`):**
         ```bash
         # Docker:
-        docker build -f server.Dockerfile -t rtk-udp-server .
+        docker build -f server.Dockerfile -t rtk.udp/server .
         # Podman:
-        podman build -f server.Dockerfile -t rtk-udp-server .
+        podman build -f server.Dockerfile -t rtk.udp/server .
         ```
-    *   **Xây dựng Client Image (`rtk-udp-client`):**
+    *   **Xây dựng Client Image (`rtk.udp/client`):**
         ```bash
         # Docker:
-        docker build -f client.Dockerfile -t rtk-udp-client .
+        docker build -f client.Dockerfile -t rtk.udp/client .
         # Podman:
-        podman build -f client.Dockerfile -t rtk-udp-client .
+        podman build -f client.Dockerfile -t rtk.udp/client .
         ```
 
 #### 2. Khởi chạy Container (Run):
@@ -246,7 +246,7 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
           -p 8080:8080/tcp \
           -v $(pwd)/uploads:/app/uploads \
           -v $(pwd)/db:/app/db \
-          rtk-udp-server
+          rtk.udp/server
         ```
     *   **Podman:**
         ```bash
@@ -256,7 +256,7 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
           -p 8080:8080/tcp \
           -v $(pwd)/uploads:/app/uploads:Z \
           -v $(pwd)/db:/app/db:Z \
-          rtk-udp-server
+          rtk.udp/server
         ```
         *(Lưu ý đối với Podman trên các hệ thống Linux bật SELinux, hậu tố `:Z` là bắt buộc để phân quyền volume).*
 
@@ -277,7 +277,7 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
           -e DISABLE_REQUEST_LOG=false \
           -v $(pwd)/uploads:/app/uploads \
           -v $(pwd)/db:/app/db \
-          rtk-udp-server
+          rtk.udp/server
         ```
     *   **Podman:**
         ```bash
@@ -295,7 +295,7 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
           -e DISABLE_REQUEST_LOG=false \
           -v $(pwd)/uploads:/app/uploads:Z \
           -v $(pwd)/db:/app/db:Z \
-          rtk-udp-server
+          rtk.udp/server
         ```
         *(Lưu ý đối với Podman trên các hệ thống Linux bật SELinux, hậu tố `:Z` là bắt buộc để phân quyền volume).*
 
@@ -307,7 +307,7 @@ Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume
         ```bash
         docker run --rm -it \
           -v $(pwd):/data:ro \
-          rtk-udp-client \
+          rtk.udp/client \
           /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
         ```
     *   **Truyền đầy đủ cấu hình qua biến môi trường (ENV):**
@@ -320,7 +320,7 @@ Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume
           -e HTTP_PORT=8080 \
           -e BLOCK_SIZE=16384 \
           -e LOG_PROGRESS=true \
-          rtk-udp-client
+          rtk.udp/client
         ```
 
 *   **Sử dụng Podman (sử dụng thêm nhãn `:Z` để gán nhãn SELinux phù hợp):**
@@ -328,7 +328,7 @@ Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume
         ```bash
         podman run --rm -it \
           -v $(pwd):/data:ro,Z \
-          rtk-udp-client \
+          rtk.udp/client \
           /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
         ```
     *   **Truyền đầy đủ cấu hình qua biến môi trường (ENV):**
@@ -341,7 +341,7 @@ Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume
           -e HTTP_PORT=8080 \
           -e BLOCK_SIZE=16384 \
           -e LOG_PROGRESS=true \
-          rtk-udp-client
+          rtk.udp/client
         ```
 
 ---

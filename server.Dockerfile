@@ -1,5 +1,5 @@
 # Stage 1: Build the Rust application
-FROM rtk-builder-base AS builder
+FROM rtk.builder/base:latest AS builder
 
 WORKDIR /usr/src/app
 COPY . .
@@ -8,7 +8,7 @@ COPY . .
 RUN cargo build --release --bin server
 
 # Stage 2: Create a minimal runner image
-FROM rtk-runtime-base
+FROM rtk.runtime/base:latest
 
 WORKDIR /app
 

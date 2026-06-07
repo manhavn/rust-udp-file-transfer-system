@@ -26,8 +26,8 @@ BUILDER_TAR=".rtk-builder-base.tar"
 RUNTIME_TAR=".rtk-runtime-base.tar"
 
 # Tên Image tags
-BUILDER_TAG="rtk-builder-base:latest"
-RUNTIME_TAG="rtk-runtime-base:latest"
+BUILDER_TAG="rtk.builder/base:latest"
+RUNTIME_TAG="rtk.runtime/base:latest"
 
 # 2. Xử lý Builder Base Image
 echo -e "${BLUE}[1/4] Kiểm tra Builder Base Image (${BUILDER_TAG})...${NC}"
@@ -91,23 +91,23 @@ read -p "Chọn dịch vụ muốn build (1-4): " choice
 echo ""
 
 build_server() {
-    echo -e "${BLUE}→ Đang xây dựng Server Image (rtk-udp-server)...${NC}"
-    $ENGINE build -f server.Dockerfile -t rtk-udp-server .
+    echo -e "${BLUE}→ Đang xây dựng Server Image (rtk.udp/server)...${NC}"
+    $ENGINE build -f server.Dockerfile -t rtk.udp/server .
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✔ Build rtk-udp-server thành công!${NC}"
+        echo -e "${GREEN}✔ Build rtk.udp/server thành công!${NC}"
     else
-        echo -e "${RED}✘ Build rtk-udp-server thất bại!${NC}"
+        echo -e "${RED}✘ Build rtk.udp/server thất bại!${NC}"
         exit 1
     fi
 }
 
 build_client() {
-    echo -e "${BLUE}→ Đang xây dựng Client Image (rtk-udp-client)...${NC}"
-    $ENGINE build -f client.Dockerfile -t rtk-udp-client .
+    echo -e "${BLUE}→ Đang xây dựng Client Image (rtk.udp/client)...${NC}"
+    $ENGINE build -f client.Dockerfile -t rtk.udp/client .
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✔ Build rtk-udp-client thành công!${NC}"
+        echo -e "${GREEN}✔ Build rtk.udp/client thành công!${NC}"
     else
-        echo -e "${RED}✘ Build rtk-udp-client thất bại!${NC}"
+        echo -e "${RED}✘ Build rtk.udp/client thất bại!${NC}"
         exit 1
     fi
 }
