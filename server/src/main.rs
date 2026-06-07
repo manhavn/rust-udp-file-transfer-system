@@ -1095,6 +1095,42 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
                 type_str, code, file_name
             );
         }
+
+        // Scan directory for unidentified files (not tracked in database/memory)
+        let (upload_dir, incomplete_timeout) = {
+            let lock = state.read().await;
+            (lock.upload_dir.clone(), lock.incomplete_timeout_mins)
+        };
+
+        if let Ok(entries) = std::fs::read_dir(&upload_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        let exists = {
+                            let lock = state.read().await;
+                            lock.uploads.contains_key(stem)
+                        };
+                        if !exists {
+                            if let Ok(metadata) = std::fs::metadata(&path) {
+                                if let Ok(modified) = metadata.modified() {
+                                    if let Ok(elapsed) = modified.elapsed() {
+                                        let elapsed_mins = elapsed.as_secs() / 60;
+                                        if elapsed_mins as i64 >= incomplete_timeout {
+                                            let _ = std::fs::remove_file(&path);
+                                            println!(
+                                                "[Cleanup] Deleted unidentified file from disk (inactive for {} mins): {:?}",
+                                                elapsed_mins, path
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

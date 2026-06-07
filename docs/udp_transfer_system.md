@@ -284,3 +284,12 @@ Hệ thống đã triển khai các nâng cấp quan trọng để tăng cườn
     3.  Sau khi thời gian gia hạn này trôi qua, tệp sẽ bị xóa bất kể lượt tải hoạt động có còn hay không (để đảm bảo tính an toàn và giải phóng tài nguyên).
     4.  Nếu các lượt tải hoạt động kết thúc sớm hơn (số lượt tải trở về `0`) và thời gian hiện tại đã vượt quá thời gian tự hủy gốc `delete_at`, tệp sẽ được tự động xóa ngay lập tức mà không cần đợi thời gian gia hạn kết thúc hoặc đợi chu kỳ quét tiếp theo.
 
+### 5.7. Tự động Dọn dẹp Tệp Tin Không Rõ Nguồn Gốc (Unidentified Files Cleanup)
+*   **Mô tả:** Trong thư mục `uploads/`, có thể xuất hiện các tệp tin không thuộc sự quản lý của cơ sở dữ liệu (tệp không rõ nguồn gốc), ví dụ do người dùng sao chép trực tiếp bằng tay vào thư mục hoặc các tệp tin tạm của các upload đã bị xóa trước đó nhưng còn sót lại.
+*   **Giải pháp:**
+    1.  Trong mỗi chu kỳ quét dọn dẹp, bên cạnh việc kiểm tra các tệp tin được đăng ký trong database, tiến trình Cleanup Worker cũng tiến hành duyệt qua tất cả các tệp tin thực tế đang nằm trên đĩa trong thư mục `uploads/`.
+    2.  Với mỗi tệp tin, Worker kiểm tra xem tên tệp (stem) có tương ứng với bất kỳ mã gói tin (`packet_code`) nào đang được lưu trữ trong danh sách upload hoạt động của SQLite/Bộ nhớ hay không.
+    3.  Nếu không tìm thấy bản ghi tương ứng (tức là tệp không rõ nguồn gốc), Worker sẽ kiểm tra thời gian sửa đổi cuối cùng (modified time) của tệp.
+    4.  Nếu thời gian từ lần sửa đổi cuối cùng của tệp đó vượt quá cấu hình thời gian hết hạn của tệp chưa hoàn thành (`--incomplete-timeout` phút), tệp sẽ bị tự động xóa bỏ hoàn toàn khỏi đĩa cứng để giải phóng dung lượng và giữ sạch hệ thống.
+
+

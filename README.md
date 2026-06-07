@@ -15,7 +15,7 @@ Hệ thống truyền tải file tốc độ cao và đáng tin cậy qua giao t
 *   **Cơ chế tải lên tiếp tục (Resumable Upload):** Cho phép tự động phát hiện và tiếp tục tải từ điểm ngắt kết nối trước đó (Checkpoint) được làm tròn về biên block để loại bỏ hoàn toàn khả năng sai lệch file.
 *   **Lưu vết bền vững bằng SQLite:** Lịch sử truyền tệp được lưu giữ vào cơ sở dữ liệu `db/data.sqlite` và tự động nạp lại khi khởi động lại Server.
 *   **Ghi dữ liệu dạng Giao dịch (Transactional Writes):** Trạng thái tiến trình chỉ được cập nhật khi hệ thống đã ghi thành công dữ liệu xuống ổ đĩa cứng vật lý.
-*   **Tiến trình ngầm dọn dẹp (Cleanup Worker):** Tự động dọn dẹp tệp tin vật lý và logs trong cơ sở dữ liệu khi vượt quá thời gian lưu trữ cho phép.
+*   **Tiến trình ngầm dọn dẹp (Cleanup Worker):** Tự động dọn dẹp tệp tin vật lý và logs trong cơ sở dữ liệu khi vượt quá thời gian lưu trữ cho phép. Ngoài ra, nó cũng tự động phát hiện và xóa các tệp tin không rõ nguồn gốc (không có trong cơ sở dữ liệu) trong thư mục uploads nếu chúng không được sửa đổi trong khoảng thời gian `--incomplete-timeout`.
 *   **Đa nền tảng và Biên dịch chéo:** Biên dịch trực tiếp cho Windows CLI (`.exe`), Linux CLI, macOS CLI và thư viện liên kết động FFI `.so` cho Android (Kotlin/Java) qua JNA/JNI.
 
 ---
