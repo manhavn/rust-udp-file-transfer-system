@@ -84,6 +84,8 @@ fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
         )",
         [],
     )?;
+    // Attempt migration for existing databases missing the delete_at column
+    let _ = conn.execute("ALTER TABLE uploads ADD COLUMN delete_at TEXT", []);
     Ok(())
 }
 
