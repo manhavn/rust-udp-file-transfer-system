@@ -119,6 +119,13 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
     scripts\send_file_windows.bat video.mp4 127.0.0.1 5000 8080
     ```
 
+#### Các tham số cấu hình của Client CLI:
+*   `--server-ip` / `-s`: Địa chỉ IP của Server (mặc định: `127.0.0.1`).
+*   `--udp-port` / `-u`: Cổng UDP của Server (mặc định: `5000`).
+*   `--http-port` / `-t`: Cổng HTTP của Server (mặc định: `8080`).
+*   `--block-size` / `-b`: Kích thước mỗi khối dữ liệu UDP gửi đi tính bằng bytes (mặc định: `16384` bytes).
+*   `--log-progress`: Hiển thị tiến trình upload dưới dạng log dòng mới (mặc định: tắt, hiển thị bằng `\r`).
+
 ---
 
 ### 4.3. Chạy ở môi trường Production (Production Run Scripts)
@@ -148,6 +155,36 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
         ```
 
 Các kịch bản này tự động phát hiện đường dẫn tệp thực thi release (trong thư mục `target/release/` hoặc cùng thư mục hiện tại nếu tệp chạy được sao chép độc lập), tự động tạo các thư mục cần thiết (`uploads/` và `db/`), rồi khởi chạy chương trình với đầy đủ tham số.
+
+---
+
+### 4.4. Cấu hình qua Biến Môi Trường (Environment Variables)
+Cả Server và Client đều hỗ trợ đọc các giá trị cấu hình từ biến môi trường của hệ thống. Điều này vô cùng tiện lợi khi chạy ứng dụng thông qua Docker, Podman hoặc Docker Compose.
+
+#### Các biến môi trường hỗ trợ cho Server:
+| Biến môi trường | Tham số CLI tương ứng | Giá trị mặc định | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `UDP_PORT` | `--udp-port`, `-u` | `5000` | Cổng UDP nhận dữ liệu |
+| `HTTP_PORT` | `--http-port`, `-h` | `8080` | Cổng HTTP REST API & Dashboard |
+| `UPLOAD_DIR` | `--upload-dir` | `./uploads` | Thư mục lưu trữ tệp tin trên disk |
+| `DB_PATH` | `--db-path` | `./db/data.sqlite` | Đường dẫn file cơ sở dữ liệu SQLite |
+| `CLEANUP_INTERVAL` | `--cleanup-interval` | `5` | Chu kỳ quét dọn dẹp (phút) |
+| `INCOMPLETE_TIMEOUT` | `--incomplete-timeout` | `60` | Hạn lưu tệp chưa xong (phút) |
+| `COMPLETED_TIMEOUT` | `--completed-timeout` | `15` | Hạn lưu tệp đã xong (phút) |
+| `DISABLE_REQUEST_LOG` | `--disable-request-log` | `false` | Tắt toàn bộ logs HTTP/UDP |
+
+#### Các biến môi trường hỗ trợ cho Client CLI:
+| Biến môi trường | Tham số CLI tương ứng | Giá trị mặc định | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `FILE_PATH` | `<đường_dẫn_file>` (vị trí số 1) | (Bắt buộc) | Đường dẫn tới tệp tin cần upload |
+| `SERVER_IP` | `--server-ip`, `-s` | `127.0.0.1` | Địa chỉ IP của Server |
+| `UDP_PORT` | `--udp-port`, `-u` | `5000` | Cổng UDP của Server |
+| `HTTP_PORT` | `--http-port`, `-t` | `8080` | Cổng HTTP của Server |
+| `BLOCK_SIZE` | `--block-size`, `-b` | `16384` | Kích thước khối UDP gửi đi (bytes) |
+| `LOG_PROGRESS` | `--log-progress` | `false` | Bật/tắt in log dòng mới |
+
+> [!NOTE]
+> Các tham số được truyền trực tiếp qua dòng lệnh (CLI Parameters) sẽ luôn có **độ ưu tiên cao nhất** và ghi đè lên các giá trị cấu hình được thiết lập trong biến môi trường.
 
 ---
 

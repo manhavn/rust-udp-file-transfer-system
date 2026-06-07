@@ -11,26 +11,27 @@ use tokio::time::{timeout, Duration};
 #[command(about = "Client truyền tải file qua UDP đáng tin cậy", long_about = None)]
 struct Args {
     /// Đường dẫn tới file cần upload
+    #[arg(env = "FILE_PATH")]
     file: String,
 
     /// Địa chỉ IP của Server
-    #[arg(short, long, default_value = "127.0.0.1")]
+    #[arg(short, long, env = "SERVER_IP", default_value = "127.0.0.1")]
     server_ip: String,
 
     /// Cổng UDP của Server
-    #[arg(short, long, default_value_t = 5000)]
+    #[arg(short, long, env = "UDP_PORT", default_value_t = 5000)]
     udp_port: u16,
 
     /// Cổng HTTP của Server
-    #[arg(short = 't', long, default_value_t = 8080)]
+    #[arg(short = 't', long, env = "HTTP_PORT", default_value_t = 8080)]
     http_port: u16,
 
     /// Kích thước mỗi khối dữ liệu UDP gửi đi (bytes)
-    #[arg(short, long, default_value_t = 16384)]
+    #[arg(short, long, env = "BLOCK_SIZE", default_value_t = 16384)]
     block_size: usize,
 
     /// Hiển thị tiến trình upload dạng log dòng mới
-    #[arg(long, default_value_t = false)]
+    #[arg(long, env = "LOG_PROGRESS", default_value_t = false)]
     log_progress: bool,
 }
 

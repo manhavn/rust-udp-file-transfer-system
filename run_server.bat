@@ -13,9 +13,9 @@ if exist "target\release\server.exe" (
     exit /b 1
 )
 
-:: Thiết lập giá trị mặc định
-set UPLOAD_DIR=./uploads
-set DB_PATH=./db/data.sqlite
+:: Thiết lập giá trị mặc định (ưu tiên ENV hệ thống nếu có)
+if "%UPLOAD_DIR%"=="" set UPLOAD_DIR=./uploads
+if "%DB_PATH%"=="" set DB_PATH=./db/data.sqlite
 
 :: Phân tích đối số dòng lệnh để tìm --upload-dir và --db-path
 setlocal enabledelayedexpansion

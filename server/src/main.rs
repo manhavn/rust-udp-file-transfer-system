@@ -32,35 +32,35 @@ pub struct UploadInfo {
 #[command(about = "Server truyền tải file qua UDP & Web Dashboard", long_about = None)]
 pub struct Args {
     /// Cổng UDP lắng nghe
-    #[arg(short, long, default_value_t = 5000)]
+    #[arg(short, long, env = "UDP_PORT", default_value_t = 5000)]
     pub udp_port: u16,
 
     /// Cổng HTTP REST API & Dashboard
-    #[arg(short, long, default_value_t = 8080)]
+    #[arg(short, long, env = "HTTP_PORT", default_value_t = 8080)]
     pub http_port: u16,
 
     /// Thư mục chứa các tệp tải lên
-    #[arg(long, default_value = "./uploads")]
+    #[arg(long, env = "UPLOAD_DIR", default_value = "./uploads")]
     pub upload_dir: String,
 
     /// Đường dẫn cơ sở dữ liệu SQLite
-    #[arg(long, default_value = "./db/data.sqlite")]
+    #[arg(long, env = "DB_PATH", default_value = "./db/data.sqlite")]
     pub db_path: String,
 
     /// Chu kỳ quét dọn dẹp tệp tin (phút)
-    #[arg(long, default_value_t = 5)]
+    #[arg(long, env = "CLEANUP_INTERVAL", default_value_t = 5)]
     pub cleanup_interval: u64,
 
     /// Thời gian tối đa lưu trữ tệp chưa hoàn thành (phút)
-    #[arg(long, default_value_t = 60)]
+    #[arg(long, env = "INCOMPLETE_TIMEOUT", default_value_t = 60)]
     pub incomplete_timeout: i64,
 
     /// Thời gian tối đa lưu trữ tệp đã hoàn thành (phút)
-    #[arg(long, default_value_t = 15)]
+    #[arg(long, env = "COMPLETED_TIMEOUT", default_value_t = 15)]
     pub completed_timeout: i64,
 
     /// Tắt toàn bộ output log request của HTTP server
-    #[arg(long, default_value_t = false)]
+    #[arg(long, env = "DISABLE_REQUEST_LOG", default_value_t = false)]
     pub disable_request_log: bool,
 }
 

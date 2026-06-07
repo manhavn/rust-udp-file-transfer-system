@@ -13,9 +13,9 @@ else
     exit 1
 fi
 
-# Thiết lập cấu hình mặc định
-UPLOAD_DIR="./uploads"
-DB_PATH="./db/data.sqlite"
+# Thiết lập cấu hình mặc định (ưu tiên ENV hệ thống nếu có)
+UPLOAD_DIR="${UPLOAD_DIR:-"./uploads"}"
+DB_PATH="${DB_PATH:-"./db/data.sqlite"}"
 
 # Phân tích tham số để lấy upload-dir và db-path nếu có truyền vào
 args_list=("$@")
