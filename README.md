@@ -188,6 +188,75 @@ Cả Server và Client đều hỗ trợ đọc các giá trị cấu hình từ
 
 ---
 
+### 4.5. Khởi chạy với Docker hoặc Podman (Container Deployment)
+Hệ thống cung cấp sẵn một `Dockerfile` ở thư mục root giúp bạn dễ dàng đóng gói và khởi chạy Server trên bất kỳ môi trường hỗ trợ container nào (như Docker, Podman).
+
+#### 1. Xây dựng Docker Image (Build):
+*   **Sử dụng Docker:**
+    ```bash
+    docker build -t rtk-udp-server .
+    ```
+*   **Sử dụng Podman:**
+    ```bash
+    podman build -t rtk-udp-server .
+    ```
+
+#### 2. Khởi chạy Container (Run):
+Khi chạy container, bạn có thể truyền các biến môi trường để tùy chỉnh cấu hình và gắn volume (ổ đĩa mạng) để lưu trữ tệp tin và dữ liệu SQLite một cách bền vững trên máy host.
+
+*   **Chạy mặc định (Tự động lưu uploads/db vào volume):**
+    *   **Docker:**
+        ```bash
+        docker run -d \
+          --name rtk-server \
+          -p 5000:5000/udp \
+          -p 8080:8080/tcp \
+          -v $(pwd)/uploads:/app/uploads \
+          -v $(pwd)/db:/app/db \
+          rtk-udp-server
+        ```
+    *   **Podman:**
+        ```bash
+        podman run -d \
+          --name rtk-server \
+          -p 5000:5000/udp \
+          -p 8080:8080/tcp \
+          -v $(pwd)/uploads:/app/uploads:Z \
+          -v $(pwd)/db:/app/db:Z \
+          rtk-udp-server
+        ```
+        *(Lưu ý đối với Podman trên các hệ thống Linux bật SELinux, hậu tố `:Z` là bắt buộc để phân quyền volume).*
+
+*   **Chạy tùy chỉnh cổng và bật logs request (Thay đổi ENV):**
+    *   **Docker:**
+        ```bash
+        docker run -d \
+          --name rtk-server \
+          -p 5005:5005/udp \
+          -p 8085:8085/tcp \
+          -e UDP_PORT=5005 \
+          -e HTTP_PORT=8085 \
+          -e DISABLE_REQUEST_LOG=false \
+          -v $(pwd)/uploads:/app/uploads \
+          -v $(pwd)/db:/app/db \
+          rtk-udp-server
+        ```
+    *   **Podman:**
+        ```bash
+        podman run -d \
+          --name rtk-server \
+          -p 5005:5005/udp \
+          -p 8085:8085/tcp \
+          -e UDP_PORT=5005 \
+          -e HTTP_PORT=8085 \
+          -e DISABLE_REQUEST_LOG=false \
+          -v $(pwd)/uploads:/app/uploads:Z \
+          -v $(pwd)/db:/app/db:Z \
+          rtk-udp-server
+        ```
+
+---
+
 ## 5. Chạy Demo Nhanh (Quick Start)
 Để kiểm tra nhanh toàn bộ hệ thống (biên dịch, tạo tệp kiểm thử 1MB, chạy server ngầm và upload dữ liệu tự động), chạy lệnh:
 ```bash
