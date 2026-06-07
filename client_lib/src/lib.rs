@@ -170,9 +170,12 @@ pub extern "C" fn rtk_upload_file(
             }
         }
 
-        // UDP Address
-        let server_udp_addr: SocketAddr = match format!("{}:{}", server_ip_str, udp_port).parse() {
-            Ok(addr) => addr,
+        // UDP Address DNS Resolution
+        let server_udp_addr: SocketAddr = match tokio::net::lookup_host(format!("{}:{}", server_ip_str, udp_port)).await {
+            Ok(mut addrs) => match addrs.next() {
+                Some(addr) => addr,
+                None => return -5,
+            },
             Err(_) => return -5,
         };
 

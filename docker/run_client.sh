@@ -47,5 +47,7 @@ echo "=========================================================="
 
 # Mount thư mục chứa file và thực thi
 docker run --rm -it \
+  --add-host=host.docker.internal:host-gateway \
+  -e SERVER_IP=host.docker.internal \
   -v "$DIR_PATH:/data:ro" \
   rtk.udp/client "/data/$FILE_NAME" "$@"

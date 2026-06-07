@@ -183,9 +183,11 @@ async fn main() -> Result<(), String> {
     }
 
     // 3. Bind local UDP socket and start upload
-    let server_udp_addr: SocketAddr = format!("{}:{}", args.server_ip, args.udp_port)
-        .parse()
-        .map_err(|e| format!("Địa chỉ Server không hợp lệ: {}", e))?;
+    let server_udp_addr = tokio::net::lookup_host(format!("{}:{}", args.server_ip, args.udp_port))
+        .await
+        .map_err(|e| format!("Không thể phân giải địa chỉ Server: {}", e))?
+        .next()
+        .ok_or_else(|| "Không tìm thấy địa chỉ IP cho Server".to_string())?;
 
     let udp_socket = UdpSocket::bind("0.0.0.0:0")
         .await

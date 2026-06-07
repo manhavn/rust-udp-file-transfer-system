@@ -47,5 +47,7 @@ echo "=========================================================="
 
 # Mount thư mục chứa file và thực thi với nhãn bảo mật :ro,Z cho SELinux
 podman run --rm -it \
+  --add-host=host.containers.internal:host-gateway \
+  -e SERVER_IP=host.containers.internal \
   -v "$DIR_PATH:/data:ro,Z" \
   rtk.udp/client "/data/$FILE_NAME" "$@"
