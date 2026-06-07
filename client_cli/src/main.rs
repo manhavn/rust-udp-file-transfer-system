@@ -112,6 +112,10 @@ async fn main() -> Result<(), String> {
         return Err(format!("File không tồn tại: {}", args.file));
     }
 
+    if args.block_size == 0 {
+        return Err("Kích thước block phải lớn hơn 0".to_string());
+    }
+
     println!("1. Đang tính toán mã băm XXH3 của file...");
     let mut file = File::open(&args.file).map_err(|e| format!("Không thể mở file: {}", e))?;
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();

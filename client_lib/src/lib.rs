@@ -104,6 +104,10 @@ pub extern "C" fn rtk_upload_file(
         return -2;
     }
 
+    if block_size == 0 {
+        return -7;
+    }
+
     // Initialize tokio runtime for execution
     let rt = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
