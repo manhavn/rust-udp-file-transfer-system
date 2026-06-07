@@ -62,5 +62,6 @@ echo "=========================================================="
 docker run --rm -it \
   --add-host=host.docker.internal:host-gateway \
   -e SERVER_IP=host.docker.internal \
+  ${DOWNLOAD_PASSWORD:+-e DOWNLOAD_PASSWORD="$DOWNLOAD_PASSWORD"} \
   -v "$DIR_PATH:/data:ro" \
   rtk.udp/client "/data/$FILE_NAME" "$@"

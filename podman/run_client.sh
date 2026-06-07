@@ -62,5 +62,6 @@ echo "=========================================================="
 podman run --rm -it \
   --add-host=host.containers.internal:host-gateway \
   -e SERVER_IP=host.containers.internal \
+  ${DOWNLOAD_PASSWORD:+-e DOWNLOAD_PASSWORD="$DOWNLOAD_PASSWORD"} \
   -v "$DIR_PATH:/data:ro,Z" \
   rtk.udp/client "/data/$FILE_NAME" "$@"
