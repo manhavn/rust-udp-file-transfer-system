@@ -613,11 +613,12 @@ const INDEX_HTML: &str = r#"
                                 </div>
                             </td>
                             <td>
-                                <div class="file-info">
-                                    <span style="font-size: 0.85rem; color: var(--text-muted)">Bắt đầu: ${formatDateTime(upload.started_at)}</span>
-                                    <span style="font-size: 0.85rem; color: var(--text-muted)">Thời gian truyền: ${calculateDuration(upload.started_at, upload.completed_at)}</span>
-                                </div>
-                            </td>
+                                 <div class="file-info">
+                                     <span style="font-size: 0.85rem; color: var(--text-muted)">Bắt đầu: ${formatDateTime(upload.started_at)}</span>
+                                     ${upload.completed_at ? `<span style="font-size: 0.85rem; color: var(--success); font-weight: 500;">Kết thúc: ${formatDateTime(upload.completed_at)}</span>` : ''}
+                                     <span style="font-size: 0.85rem; color: var(--text-muted)">Thời gian truyền: ${calculateDuration(upload.started_at, upload.completed_at)}</span>
+                                 </div>
+                             </td>
                             <td>
                                 <a ${downloadAttr} class="${downloadClass}" download>
                                     📥 Tải về
@@ -724,6 +725,76 @@ async fn register_upload(
         "packet_code": payload.packet_code,
         "bytes_received": bytes_received
     }))
+}
+
+async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
+    println!("File retention cleanup worker started.");
+    loop {
+        // Run checks every 60 seconds (1 minute) to process completed files precisely at 15 minutes.
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        let now = Utc::now();
+        let mut to_delete = Vec::new();
+
+        {
+            let lock = state.read().await;
+            for (code, upload) in &lock.uploads {
+                if upload.status == "Hoàn thành" {
+                    if let Some(completed_at) = upload.completed_at {
+                        if now.signed_duration_since(completed_at).num_minutes() >= 15 {
+                            to_delete.push((code.clone(), upload.file_name.clone(), true));
+                        }
+                    }
+                } else if upload.status == "Đang nhận" {
+                    // Check file modification time
+                    let file_path = std::path::Path::new(&lock.upload_dir).join(&upload.file_name);
+                    let mut is_old = false;
+                    if file_path.exists() {
+                        if let Ok(metadata) = file_path.metadata() {
+                            if let Ok(modified) = metadata.modified() {
+                                let modified_dt: DateTime<Utc> = modified.into();
+                                if now.signed_duration_since(modified_dt).num_hours() >= 1 {
+                                    is_old = true;
+                                }
+                            }
+                        }
+                    } else {
+                        // If file doesn't exist on disk, we check if it started more than 1 hour ago
+                        if now.signed_duration_since(upload.started_at).num_hours() >= 1 {
+                            is_old = true;
+                        }
+                    }
+                    if is_old {
+                        to_delete.push((code.clone(), upload.file_name.clone(), false));
+                    }
+                }
+            }
+        }
+
+        for (code, file_name, is_completed) in to_delete {
+            let mut lock = state.write().await;
+            lock.uploads.remove(&code);
+
+            let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name);
+            let _ = std::fs::remove_file(&file_path);
+
+            let db_path = lock.db_path.clone();
+            let code_clone = code.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                    let _ = conn.execute(
+                        "DELETE FROM uploads WHERE packet_code = ?1",
+                        rusqlite::params![code_clone],
+                    );
+                }
+            }).await;
+
+            let type_str = if is_completed { "completed" } else { "incomplete" };
+            println!(
+                "[Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
+                type_str, code, file_name
+            );
+        }
+    }
 }
 
 async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
@@ -883,6 +954,12 @@ async fn main() {
     let udp_state = state.clone();
     tokio::spawn(async move {
         run_udp_server(udp_state, 5000).await;
+    });
+
+    // Start Cleanup Worker Task
+    let cleanup_state = state.clone();
+    tokio::spawn(async move {
+        run_cleanup_worker(cleanup_state).await;
     });
 
     // Start HTTP Server
