@@ -1,3 +1,4 @@
+use clap::Parser;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,10 +26,46 @@ pub struct UploadInfo {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Parser, Debug, Clone)]
+#[command(name = "rtk-server")]
+#[command(about = "Server truyền tải file qua UDP & Web Dashboard", long_about = None)]
+pub struct Args {
+    /// Cổng UDP lắng nghe
+    #[arg(short, long, default_value_t = 5000)]
+    pub udp_port: u16,
+
+    /// Cổng HTTP REST API & Dashboard
+    #[arg(short, long, default_value_t = 8080)]
+    pub http_port: u16,
+
+    /// Thư mục chứa các tệp tải lên
+    #[arg(long, default_value = "./uploads")]
+    pub upload_dir: String,
+
+    /// Đường dẫn cơ sở dữ liệu SQLite
+    #[arg(long, default_value = "./db/data.sqlite")]
+    pub db_path: String,
+
+    /// Chu kỳ quét dọn dẹp tệp tin (phút)
+    #[arg(long, default_value_t = 5)]
+    pub cleanup_interval: u64,
+
+    /// Thời gian tối đa lưu trữ tệp chưa hoàn thành (phút)
+    #[arg(long, default_value_t = 60)]
+    pub incomplete_timeout: i64,
+
+    /// Thời gian tối đa lưu trữ tệp đã hoàn thành (phút)
+    #[arg(long, default_value_t = 15)]
+    pub completed_timeout: i64,
+}
+
 pub struct ServerState {
     pub uploads: HashMap<String, UploadInfo>,
     pub upload_dir: String,
     pub db_path: String,
+    pub cleanup_interval: u64,
+    pub incomplete_timeout_mins: i64,
+    pub completed_timeout_mins: i64,
 }
 
 fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
@@ -728,19 +765,28 @@ async fn register_upload(
 }
 
 async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
-    println!("File retention cleanup worker started.");
+    let interval_mins = {
+        let lock = state.read().await;
+        lock.cleanup_interval
+    };
+    println!("File retention cleanup worker started. Scan interval: {} minutes.", interval_mins);
     loop {
-        // Run checks every 300 seconds (5 minutes).
-        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        // Run checks based on the configured cleanup interval
+        tokio::time::sleep(tokio::time::Duration::from_secs(interval_mins * 60)).await;
         let now = Utc::now();
         let mut to_delete = Vec::new();
+
+        let (incomplete_timeout_mins, completed_timeout_mins) = {
+            let lock = state.read().await;
+            (lock.incomplete_timeout_mins, lock.completed_timeout_mins)
+        };
 
         {
             let lock = state.read().await;
             for (code, upload) in &lock.uploads {
                 if upload.status == "Hoàn thành" {
                     if let Some(completed_at) = upload.completed_at {
-                        if now.signed_duration_since(completed_at).num_minutes() >= 15 {
+                        if now.signed_duration_since(completed_at).num_minutes() >= completed_timeout_mins {
                             to_delete.push((code.clone(), upload.file_name.clone(), true));
                         }
                     }
@@ -752,14 +798,14 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
                         if let Ok(metadata) = file_path.metadata() {
                             if let Ok(modified) = metadata.modified() {
                                 let modified_dt: DateTime<Utc> = modified.into();
-                                if now.signed_duration_since(modified_dt).num_hours() >= 1 {
+                                if now.signed_duration_since(modified_dt).num_minutes() >= incomplete_timeout_mins {
                                     is_old = true;
                                 }
                             }
                         }
                     } else {
-                        // If file doesn't exist on disk, we check if it started more than 1 hour ago
-                        if now.signed_duration_since(upload.started_at).num_hours() >= 1 {
+                        // If file doesn't exist on disk, we check if it started more than incomplete_timeout_mins ago
+                        if now.signed_duration_since(upload.started_at).num_minutes() >= incomplete_timeout_mins {
                             is_old = true;
                         }
                     }
@@ -921,13 +967,16 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
 
 #[tokio::main]
 async fn main() {
-    let upload_dir = "./uploads".to_string();
+    // Parse command line arguments
+    let args = Args::parse();
+
+    let upload_dir = args.upload_dir.clone();
     let _ = std::fs::create_dir_all(&upload_dir);
 
     // Initialize SQLite database
-    let db_dir = "./db".to_string();
-    let _ = std::fs::create_dir_all(&db_dir);
-    let db_path = "./db/data.sqlite".to_string();
+    let db_path = args.db_path.clone();
+    let db_dir = std::path::Path::new(&db_path).parent().unwrap_or(std::path::Path::new("."));
+    let _ = std::fs::create_dir_all(db_dir);
     if let Err(e) = init_db(&db_path) {
         eprintln!("[DB] Failed to initialize SQLite database: {}", e);
     }
@@ -948,12 +997,16 @@ async fn main() {
         uploads,
         upload_dir: upload_dir.clone(),
         db_path,
+        cleanup_interval: args.cleanup_interval,
+        incomplete_timeout_mins: args.incomplete_timeout,
+        completed_timeout_mins: args.completed_timeout,
     }));
 
     // Start UDP Server Task
     let udp_state = state.clone();
+    let udp_port = args.udp_port;
     tokio::spawn(async move {
-        run_udp_server(udp_state, 5000).await;
+        run_udp_server(udp_state, udp_port).await;
     });
 
     // Start Cleanup Worker Task
@@ -971,7 +1024,7 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let http_addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let http_addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
     println!("HTTP Server running on http://{}", http_addr);
     let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

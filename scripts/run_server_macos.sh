@@ -21,4 +21,4 @@ else
 fi
 
 echo "==> Đang khởi chạy UDP & HTTP Server trên macOS..."
-$BINARY
+$BINARY "$@"

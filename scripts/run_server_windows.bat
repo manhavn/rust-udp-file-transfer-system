@@ -26,4 +26,4 @@ if "%BINARY%"=="" (
 )
 
 echo ==> Đang khởi chạy UDP ^& HTTP Server trên Windows...
-%BINARY%
+%BINARY% %*

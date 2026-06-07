@@ -13,4 +13,4 @@ else
 fi
 
 echo "==> Đang khởi chạy UDP & HTTP Server trên Linux..."
-$BINARY
+$BINARY "$@"
