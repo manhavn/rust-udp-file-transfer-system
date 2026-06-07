@@ -673,11 +673,11 @@ const INDEX_HTML: &str = r#"
 
                 let html = '';
                 data.forEach(upload => {
-                    const progress = upload.file_size > 0 
-                        ? Math.min(100, Math.round((upload.bytes_received / upload.file_size) * 100)) 
-                        : 0;
-
                     const isCompleted = upload.status === 'Hoàn thành';
+                    const progress = isCompleted 
+                        ? 100 
+                        : (upload.file_size > 0 ? Math.min(100, Math.round((upload.bytes_received / upload.file_size) * 100)) : 0);
+
                     const statusClass = isCompleted ? 'badge-completed' : 'badge-receiving';
                     const downloadAttr = isCompleted ? `href="/uploads/${encodeURIComponent(upload.packet_code)}"` : '';
                     const downloadClass = isCompleted ? 'download-btn' : 'download-btn disabled';
