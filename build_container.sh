@@ -24,13 +24,15 @@ echo -e "${BLUE}=== UDP Transfer System - Khởi tạo build Container sử dụ
 # Tên file cache base
 BUILDER_TAR=".rtk-builder-base.tar"
 RUNTIME_TAR=".rtk-runtime-base.tar"
+APP_DEP_TAR=".rtk-dep-cache.tar"
 
 # Tên Image tags
 BUILDER_TAG="rtk.builder/base:latest"
 RUNTIME_TAG="rtk.runtime/base:latest"
+APP_DEP_TAG="rtk.app/dep-cache:latest"
 
 # 2. Xử lý Builder Base Image
-echo -e "${BLUE}[1/4] Kiểm tra Builder Base Image (${BUILDER_TAG})...${NC}"
+echo -e "${BLUE}[1/5] Kiểm tra Builder Base Image (${BUILDER_TAG})...${NC}"
 if $ENGINE image inspect $BUILDER_TAG >/dev/null 2>&1; then
     echo -e "${GREEN}✔ Builder Base Image đã tồn tại cục bộ.${NC}"
 else
@@ -56,7 +58,7 @@ fi
 echo ""
 
 # 3. Xử lý Runtime Base Image
-echo -e "${BLUE}[2/4] Kiểm tra Runtime Base Image (${RUNTIME_TAG})...${NC}"
+echo -e "${BLUE}[2/5] Kiểm tra Runtime Base Image (${RUNTIME_TAG})...${NC}"
 if $ENGINE image inspect $RUNTIME_TAG >/dev/null 2>&1; then
     echo -e "${GREEN}✔ Runtime Base Image đã tồn tại cục bộ.${NC}"
 else
@@ -81,19 +83,65 @@ else
 fi
 echo ""
 
-# 4. Hiển thị Menu lựa chọn build thành phẩm
-echo -e "${BLUE}[3/4] Biên dịch ứng dụng đích:${NC}"
-echo "1) Build Server Image (rtk-udp-server)"
-echo "2) Build Client Image (rtk-udp-client)"
+# 4. Xử lý App Dependency Cache Image
+echo -e "${BLUE}[3/5] Kiểm tra App Dependency Cache Image (${APP_DEP_TAG})...${NC}"
+if $ENGINE image inspect $APP_DEP_TAG >/dev/null 2>&1; then
+    echo -e "${GREEN}✔ App Dependency Cache Image đã tồn tại cục bộ.${NC}"
+else
+    if [ -f "$APP_DEP_TAR" ]; then
+        echo -e "${YELLOW}→ Tìm thấy tệp cache ${APP_DEP_TAR}, đang tiến hành nạp...${NC}"
+        $ENGINE load -i $APP_DEP_TAR
+    fi
+
+    if $ENGINE image inspect $APP_DEP_TAG >/dev/null 2>&1; then
+        echo -e "${GREEN}✔ Nạp thành công App Dependency Cache từ tệp cache.${NC}"
+    else
+        echo -e "${YELLOW}→ Không tìm thấy cache, tiến hành biên dịch App Dependency Cache từ dep-cache.Dockerfile...${NC}"
+        $ENGINE build -f dep-cache.Dockerfile -t $APP_DEP_TAG .
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✔ Tạo thành công ${APP_DEP_TAG}. Đang xuất tệp cache...${NC}"
+            $ENGINE save $APP_DEP_TAG -o $APP_DEP_TAR
+        else
+            echo -e "${RED}✘ Lỗi khi biên dịch App Dependency Cache!${NC}"
+            exit 1
+        fi
+    fi
+fi
+echo ""
+
+# 5. Hiển thị Menu lựa chọn build thành phẩm
+echo -e "${BLUE}[4/5] Biên dịch ứng dụng đích:${NC}"
+echo "1) Build Server Image (rtk.udp/server)"
+echo "2) Build Client Image (rtk.udp/client)"
 echo "3) Build Cả hai (Both)"
 echo "4) Thoát"
 read -p "Chọn dịch vụ muốn build (1-4): " choice
 echo ""
 
+ensure_dep_cache() {
+    if ! $ENGINE image inspect $APP_DEP_TAG >/dev/null 2>&1; then
+        if [ -f "$APP_DEP_TAR" ]; then
+            echo -e "${YELLOW}→ Đang nạp lại App Dependency Cache (${APP_DEP_TAG}) từ tệp tar...${NC}"
+            $ENGINE load -i $APP_DEP_TAR
+        else
+            echo -e "${RED}Lỗi: Không tìm thấy tệp cache ${APP_DEP_TAR}! Vui lòng khởi động lại script để tạo lại.${NC}"
+            exit 1
+        fi
+    fi
+}
+
+cleanup_dep_cache() {
+    echo -e "${YELLOW}→ Đang xóa image compile cache (${APP_DEP_TAG}) khỏi bộ lưu trữ cục bộ để tiết kiệm đĩa...${NC}"
+    $ENGINE rmi $APP_DEP_TAG >/dev/null 2>&1
+}
+
 build_server() {
+    ensure_dep_cache
     echo -e "${BLUE}→ Đang xây dựng Server Image (rtk.udp/server)...${NC}"
     $ENGINE build -f server.Dockerfile -t rtk.udp/server .
-    if [ $? -eq 0 ]; then
+    BUILD_RES=$?
+    cleanup_dep_cache
+    if [ $BUILD_RES -eq 0 ]; then
         echo -e "${GREEN}✔ Build rtk.udp/server thành công!${NC}"
     else
         echo -e "${RED}✘ Build rtk.udp/server thất bại!${NC}"
@@ -102,9 +150,12 @@ build_server() {
 }
 
 build_client() {
+    ensure_dep_cache
     echo -e "${BLUE}→ Đang xây dựng Client Image (rtk.udp/client)...${NC}"
     $ENGINE build -f client.Dockerfile -t rtk.udp/client .
-    if [ $? -eq 0 ]; then
+    BUILD_RES=$?
+    cleanup_dep_cache
+    if [ $BUILD_RES -eq 0 ]; then
         echo -e "${GREEN}✔ Build rtk.udp/client thành công!${NC}"
     else
         echo -e "${RED}✘ Build rtk.udp/client thất bại!${NC}"
@@ -129,4 +180,4 @@ case $choice in
         ;;
 esac
 
-echo -e "\n${GREEN}✔ Hoàn tất toàn bộ quy trình!${NC}"
+echo -e "\n${GREEN}✔ [5/5] Hoàn tất toàn bộ quy trình!${NC}"

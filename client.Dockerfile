@@ -1,8 +1,15 @@
 # Stage 1: Build the Rust application
-FROM rtk.builder/base:latest AS builder
+FROM rtk.app/dep-cache:latest AS builder
 
 WORKDIR /usr/src/app
-COPY . .
+
+# Copy the actual source files
+COPY common common
+COPY client_lib client_lib
+COPY client_cli client_cli
+
+# Touch files to force rebuild of the application code
+RUN touch common/src/lib.rs client_lib/src/lib.rs client_cli/src/main.rs
 
 # Build the client binary in release mode
 RUN cargo build --release --bin client_cli
