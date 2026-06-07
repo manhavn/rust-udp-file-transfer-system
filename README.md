@@ -234,6 +234,17 @@ Bạn có thể build tự động qua script (khuyên dùng) hoặc build thủ
         podman build -f client.Dockerfile -t rtk.udp/client .
         ```
 
+> [!IMPORTANT]
+> **Lưu ý về dung lượng đĩa:** Sau khi chạy biên dịch tự động qua `./build_container.sh`, toàn bộ các image build trung gian và image thành phẩm đều sẽ được tự động xóa khỏi Docker/Podman Engine để tiết kiệm dung lượng đĩa tối đa (chỉ giữ lại cục bộ dưới dạng các tệp `.tar`).
+>
+> Trước khi chạy các lệnh khởi chạy dưới đây, bạn cần nạp lại image mong muốn từ tệp `.tar` tương ứng:
+> *   **Nạp Server Image:**
+>     *   Docker: `docker load -i rtk-udp-server.tar`
+>     *   Podman: `podman load -i rtk-udp-server.tar`
+> *   **Nạp Client Image:**
+>     *   Docker: `docker load -i rtk-udp-client.tar`
+>     *   Podman: `podman load -i rtk-udp-client.tar`
+
 #### 2. Khởi chạy Container (Run):
 Khi chạy container, bạn có thể truyền các biến môi trường để tùy chỉnh cấu hình và gắn volume (ổ đĩa mạng) để lưu trữ tệp tin và dữ liệu SQLite một cách bền vững trên máy host.
 
