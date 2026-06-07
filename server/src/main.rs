@@ -730,8 +730,8 @@ async fn register_upload(
 async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
     println!("File retention cleanup worker started.");
     loop {
-        // Run checks every 60 seconds (1 minute) to process completed files precisely at 15 minutes.
-        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        // Run checks every 300 seconds (5 minutes).
+        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
         let now = Utc::now();
         let mut to_delete = Vec::new();
 
