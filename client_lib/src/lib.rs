@@ -4,7 +4,6 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::Path;
-use sha2::{Digest, Sha256};
 use tokio::net::UdpSocket;
 use tokio::time::{timeout, Duration};
 
@@ -118,7 +117,7 @@ pub extern "C" fn rtk_upload_file(
             Err(_) => return -2,
         };
 
-        let mut hasher = Sha256::new();
+        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
         let mut hash_buf = vec![0u8; 65536];
         loop {
             let n = match file.read(&mut hash_buf) {
@@ -128,9 +127,10 @@ pub extern "C" fn rtk_upload_file(
             };
             hasher.update(&hash_buf[..n]);
         }
-        let hash_result: [u8; 32] = hasher.finalize().into();
+        let hash_result = hasher.digest();
+        let hash_bytes = hash_result.to_be_bytes();
 
-        let packet_code_bytes = common::generate_packet_code_from_hash(&hash_result);
+        let packet_code_bytes = common::generate_packet_code_from_hash(&hash_bytes);
         let packet_code_str = common::bytes_to_unique_id(&packet_code_bytes);
         
         let file_size = match file.metadata() {

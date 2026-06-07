@@ -3,7 +3,6 @@ use std::io::{Read, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::Path;
 use clap::Parser;
-use sha2::{Digest, Sha256};
 use tokio::net::UdpSocket;
 use tokio::time::{timeout, Duration};
 
@@ -112,9 +111,9 @@ async fn main() -> Result<(), String> {
         return Err(format!("File không tồn tại: {}", args.file));
     }
 
-    println!("1. Đang tính toán mã băm SHA-256 của file...");
+    println!("1. Đang tính toán mã băm XXH3 của file...");
     let mut file = File::open(&args.file).map_err(|e| format!("Không thể mở file: {}", e))?;
-    let mut hasher = Sha256::new();
+    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
     let mut hash_buf = vec![0u8; 65536];
     loop {
         let n = file.read(&mut hash_buf).map_err(|e| format!("Lỗi đọc file khi băm: {}", e))?;
@@ -123,10 +122,11 @@ async fn main() -> Result<(), String> {
         }
         hasher.update(&hash_buf[..n]);
     }
-    let hash_result: [u8; 32] = hasher.finalize().into();
+    let hash_result = hasher.digest();
+    let hash_bytes = hash_result.to_be_bytes();
 
     // Generate unique packet code bytes
-    let packet_code_bytes = common::generate_packet_code_from_hash(&hash_result);
+    let packet_code_bytes = common::generate_packet_code_from_hash(&hash_bytes);
     let packet_code_str = common::bytes_to_unique_id(&packet_code_bytes);
     println!("   -> Mã gói tin (Hash ID): {}", packet_code_str);
 

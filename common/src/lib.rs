@@ -58,10 +58,11 @@ pub fn bytes_to_unique_id(bytes: &[u8]) -> String {
     bytes.iter().map(|b| b.to_string()).collect()
 }
 
-/// Generates the packet code bytes from a SHA-256 hash.
-/// It takes the first 10 bytes of the hash and maps them to `0..=254` using `byte % 255`.
-pub fn generate_packet_code_from_hash(sha256_hash: &[u8; 32]) -> Vec<u8> {
-    sha256_hash[0..10]
+/// Generates the packet code bytes from a file hash.
+/// It takes the first 10 bytes (or all available if less than 10) and maps them to `0..=254` using `byte % 255`.
+pub fn generate_packet_code_from_hash(hash_bytes: &[u8]) -> Vec<u8> {
+    let take_len = hash_bytes.len().min(10);
+    hash_bytes[0..take_len]
         .iter()
         .map(|&b| b % 255)
         .collect()
