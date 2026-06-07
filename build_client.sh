@@ -70,13 +70,21 @@ if [ -z "$TARGET" ]; then
     OUT_DIR="target/release"
     BINARY_NAME="client_cli"
 else
-    cargo build --release --target $TARGET --bin client_cli
+    if [[ "$TARGET" == *"windows-gnu"* ]]; then
+        # Statically link MinGW runtime DLLs (libgcc, libwinpthread, etc.) for Windows
+        RUSTFLAGS="-C link-args=-static" cargo build --release --target $TARGET --bin client_cli
+    else
+        cargo build --release --target $TARGET --bin client_cli
+    fi
     BUILD_STATUS=$?
     OUT_DIR="target/$TARGET/release"
     if [[ "$TARGET" == *"windows"* ]]; then
         BINARY_NAME="client_cli.exe"
     else
         BINARY_NAME="client_cli"
+    fi
+    if [[ "$TARGET" == *"darwin"* ]]; then
+        echo -e "${YELLOW}Lưu ý: Trên macOS, tệp được liên kết động tới libSystem.dylib để tương thích với Apple API, đảm bảo tự chạy được trên mọi máy Mac.${NC}"
     fi
 fi
 
