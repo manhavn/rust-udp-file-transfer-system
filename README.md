@@ -25,7 +25,8 @@ Hệ thống truyền tải file tốc độ cao và đáng tin cậy qua giao t
 *   **`common/`**: Thư viện lõi chứa thuật toán mã hóa chữ số, cấu trúc và phân tích cú pháp gói tin `UdpPacket` & `AckPacket`.
 *   **`server/`**: Server lắng nghe cổng UDP, REST API đăng ký và Dashboard quản lý thời gian thực.
 *   **`client_cli/`**: Ứng dụng dòng lệnh (CLI) giúp tính mã băm SHA-256 của file và đẩy lên Server.
-*   **`client_lib/`**: Thư viện động C-FFI dùng để tích hợp vào ứng dụng di động (Android Kotlin/Java).
+*   **`client_gui/`**: Ứng dụng giao diện đồ họa Desktop (GUI) chạy trên Windows, Linux và macOS sử dụng Tauri v2.
+*   **`client_lib/`**: Thư viện động C-FFI dùng để tích hợp vào ứng dụng di động (Android Kotlin/Java) hoặc các ứng dụng khác.
 *   **`scripts/`**: Các kịch bản chạy thử nghiệm, khởi động Server và Client cho từng OS cụ thể.
 *   **`docs/`**: Tài liệu kỹ thuật chuyên sâu về cấu trúc gói tin, hướng dẫn tích hợp Android và tài liệu triển khai VPS.
 

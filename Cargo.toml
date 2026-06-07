@@ -3,6 +3,7 @@ members = [
     "common",
     "server",
     "client_cli",
-    "client_lib"
+    "client_lib",
+    "client_gui/src-tauri"
 ]
 resolver = "2"
