@@ -263,6 +263,6 @@ async fn main() -> Result<(), String> {
     )
     .await?;
 
-    println!("🎉 Tải file lên thành công!");
+    println!("🎉 Tải file lên thành công! Mã Hash ID: {}", packet_code_str);
     Ok(())
 }

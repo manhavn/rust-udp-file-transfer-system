@@ -544,6 +544,147 @@ const INDEX_HTML: &str = r#"
             font-size: 3rem;
             opacity: 0.4;
         }
+
+        /* Search and Filter Controls */
+        .controls-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.5rem;
+            padding: 0 0.5rem;
+        }
+
+        .search-container {
+            position: relative;
+            flex-grow: 1;
+            max-width: 500px;
+            min-width: 250px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 0.75rem 1rem 0.75rem 2.5rem;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text-main);
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.85rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            pointer-events: none;
+            font-size: 1rem;
+        }
+
+        .page-size-selector {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .page-size-select {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 0.5rem 2.2rem 0.5rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.3s;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1rem;
+        }
+
+        .page-size-select:focus, .page-size-select:hover {
+            border-color: var(--primary);
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        /* Pagination Controls */
+        .pagination-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 1rem 0.25rem 1rem;
+            border-top: 1px solid var(--border);
+            margin-top: 1rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .pagination-info {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .pagination-buttons {
+            display: flex;
+            gap: 0.35rem;
+            align-items: center;
+        }
+
+        .page-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 0.5rem 0.85rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 35px;
+        }
+
+        .page-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--border-hover);
+        }
+
+        .page-btn.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-color: transparent;
+            color: white;
+            box-shadow: 0 4px 10px var(--primary-glow);
+        }
+
+        .page-btn.disabled {
+            background: rgba(255, 255, 255, 0.01);
+            border-color: rgba(255, 255, 255, 0.03);
+            color: rgba(255, 255, 255, 0.2);
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .page-ellipsis {
+            color: var(--text-muted);
+            padding: 0 0.25rem;
+            user-select: none;
+        }
     </style>
 </head>
 <body>
@@ -590,6 +731,24 @@ const INDEX_HTML: &str = r#"
                 </button>
             </div>
 
+            <!-- Controls Row (Search & Page Size) -->
+            <div class="controls-row">
+                <div class="search-container">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="search-input" class="search-input" placeholder="Tìm kiếm theo tên file hoặc mã Hash ID..." oninput="handleSearch(this.value)">
+                </div>
+                <div class="page-size-selector">
+                    <span>Hiển thị:</span>
+                    <select id="page-size-select" class="page-size-select" onchange="handlePageSizeChange(this.value)">
+                        <option value="5">5 mục</option>
+                        <option value="10" selected>10 mục</option>
+                        <option value="20">20 mục</option>
+                        <option value="50">50 mục</option>
+                        <option value="100">100 mục</option>
+                    </select>
+                </div>
+            </div>
+
             <div class="table-container">
                 <table>
                     <thead>
@@ -612,10 +771,25 @@ const INDEX_HTML: &str = r#"
                     <p>Khởi chạy client app để bắt đầu truyền tải file lên server.</p>
                 </div>
             </div>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container" id="pagination-controls" style="display: none;">
+                <div class="pagination-info" id="pagination-info">
+                    Hiển thị <b>0</b> - <b>0</b> trong số <b>0</b> file
+                </div>
+                <div class="pagination-buttons" id="pagination-buttons">
+                    <!-- Dynamic buttons -->
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
+        let allUploads = [];
+        let searchQuery = '';
+        let currentPage = 1;
+        let pageSize = 10;
+
         function formatBytes(bytes, decimals = 2) {
             if (bytes === 0) return '0 Bytes';
             const k = 1024;
@@ -663,81 +837,171 @@ const INDEX_HTML: &str = r#"
 
         async function fetchUploads() {
             try {
-                const response = await fetch('/api/list');
+                const response = await fetch(`/api/list?search=${encodeURIComponent(searchQuery)}&page=${currentPage}&limit=${pageSize}`);
                 const data = await response.json();
                 
                 // Update stats
-                document.getElementById('stat-total').innerText = data.length;
-                const activeCount = data.filter(u => u.status === 'Đang nhận').length;
-                document.getElementById('stat-active').innerText = activeCount;
-                
-                const totalBytes = data.reduce((acc, curr) => acc + curr.bytes_received, 0);
-                document.getElementById('stat-size').innerText = formatBytes(totalBytes);
+                document.getElementById('stat-total').innerText = data.total_count || 0;
+                document.getElementById('stat-active').innerText = data.active_count || 0;
+                document.getElementById('stat-size').innerText = formatBytes(data.total_bytes || 0);
 
-                const tbody = document.getElementById('uploads-table-body');
-                const emptyView = document.getElementById('empty-view');
-
-                if (data.length === 0) {
-                    tbody.innerHTML = '';
-                    emptyView.style.display = 'flex';
-                    return;
-                }
-                emptyView.style.display = 'none';
-
-                let html = '';
-                data.forEach(upload => {
-                    const isCompleted = upload.status === 'Hoàn thành';
-                    const progress = isCompleted 
-                        ? 100 
-                        : (upload.file_size > 0 ? Math.min(100, Math.round((upload.bytes_received / upload.file_size) * 100)) : 0);
-
-                    const statusClass = isCompleted ? 'badge-completed' : 'badge-receiving';
-                    const downloadOnClick = isCompleted ? `onclick="handleDownload('${upload.packet_code}', ${upload.has_password})"` : '';
-                    const downloadClass = isCompleted ? 'download-btn' : 'download-btn disabled';
-                    const lockIcon = upload.has_password ? '<span style="color: var(--warning); margin-left: 4px;" title="File được bảo vệ bằng mật khẩu">🔒</span>' : '';
-
-                    html += `
-                        <tr>
-                            <td>
-                                <div class="file-info">
-                                    <span class="file-name">${upload.file_name}${lockIcon}</span>
-                                    <span class="packet-code">Hash ID: ${upload.packet_code}</span>
-                                </div>
-                            </td>
-                            <td>
-                                <b>${formatBytes(upload.bytes_received)}</b> / ${formatBytes(upload.file_size)}
-                            </td>
-                            <td>
-                                <span class="badge ${statusClass}">${upload.status}</span>
-                            </td>
-                            <td>
-                                <div class="progress-container">
-                                    <div class="progress-bar-bg">
-                                        <div class="progress-bar-fill" style="width: ${progress}%"></div>
-                                    </div>
-                                    <span class="progress-text">${progress}%</span>
-                                </div>
-                            </td>
-                            <td>
-                                 <div class="file-info">
-                                     <span style="font-size: 0.85rem; color: var(--text-muted)">Bắt đầu: ${formatDateTime(upload.started_at)}</span>
-                                     ${upload.completed_at ? `<span style="font-size: 0.85rem; color: var(--success); font-weight: 500;">Kết thúc: ${formatDateTime(upload.completed_at)}</span>` : ''}
-                                     <span style="font-size: 0.85rem; color: var(--text-muted)">Thời gian truyền: ${calculateDuration(upload.started_at, upload.completed_at)}</span>
-                                     ${formatDeleteAt(upload.delete_at, upload.extended_delete_at)}
-                                 </div>
-                             </td>
-                            <td>
-                                <button ${downloadOnClick} class="${downloadClass}" style="border: none;">
-                                    📥 Tải về
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                });
-                tbody.innerHTML = html;
+                renderTable(data);
             } catch (error) {
                 console.error('Error fetching uploads:', error);
             }
+        }
+
+        function handleSearch(query) {
+            searchQuery = query;
+            currentPage = 1;
+            fetchUploads();
+        }
+
+        function handlePageSizeChange(size) {
+            pageSize = parseInt(size, 10);
+            currentPage = 1;
+            fetchUploads();
+        }
+
+        function changePage(page) {
+            currentPage = page;
+            fetchUploads();
+        }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('uploads-table-body');
+            const emptyView = document.getElementById('empty-view');
+            const paginationControls = document.getElementById('pagination-controls');
+
+            const items = data.items || [];
+            const filteredCount = data.filtered_count || 0;
+            const totalCount = data.total_count || 0;
+
+            // 1. Empty state
+            if (filteredCount === 0) {
+                tbody.innerHTML = '';
+                emptyView.style.display = 'flex';
+                const query = searchQuery.trim();
+                if (query !== '') {
+                    emptyView.querySelector('h3').innerText = 'Không tìm thấy kết quả phù hợp';
+                    emptyView.querySelector('p').innerText = 'Thử tìm kiếm với từ khóa khác.';
+                } else {
+                    emptyView.querySelector('h3').innerText = 'Không có file nào đang hoặc đã truyền tải';
+                    emptyView.querySelector('p').innerText = 'Khởi chạy client app để bắt đầu truyền tải file lên server.';
+                }
+                paginationControls.style.display = 'none';
+                return;
+            }
+            emptyView.style.display = 'none';
+
+            // 2. Render Table rows
+            let html = '';
+            items.forEach(upload => {
+                const isCompleted = upload.status === 'Hoàn thành';
+                const progress = isCompleted 
+                    ? 100 
+                    : (upload.file_size > 0 ? Math.min(100, Math.round((upload.bytes_received / upload.file_size) * 100)) : 0);
+
+                const statusClass = isCompleted ? 'badge-completed' : 'badge-receiving';
+                const downloadOnClick = isCompleted ? `onclick="handleDownload('${upload.packet_code}', ${upload.has_password})"` : '';
+                const downloadClass = isCompleted ? 'download-btn' : 'download-btn disabled';
+                const lockIcon = upload.has_password ? '<span style="color: var(--warning); margin-left: 4px;" title="File được bảo vệ bằng mật khẩu">🔒</span>' : '';
+
+                html += `
+                    <tr>
+                        <td>
+                            <div class="file-info">
+                                <span class="file-name">${upload.file_name}${lockIcon}</span>
+                                <span class="packet-code">Hash ID: ${upload.packet_code}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <b>${formatBytes(upload.bytes_received)}</b> / ${formatBytes(upload.file_size)}
+                        </td>
+                        <td>
+                            <span class="badge ${statusClass}">${upload.status}</span>
+                        </td>
+                        <td>
+                            <div class="progress-container">
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill" style="width: ${progress}%"></div>
+                                </div>
+                                <span class="progress-text">${progress}%</span>
+                            </div>
+                        </td>
+                        <td>
+                             <div class="file-info">
+                                 <span style="font-size: 0.85rem; color: var(--text-muted)">Bắt đầu: ${formatDateTime(upload.started_at)}</span>
+                                 ${upload.completed_at ? `<span style="font-size: 0.85rem; color: var(--success); font-weight: 500;">Kết thúc: ${formatDateTime(upload.completed_at)}</span>` : ''}
+                                 <span style="font-size: 0.85rem; color: var(--text-muted)">Thời gian truyền: ${calculateDuration(upload.started_at, upload.completed_at)}</span>
+                                 ${formatDeleteAt(upload.delete_at, upload.extended_delete_at)}
+                             </div>
+                         </td>
+                        <td>
+                            <button ${downloadOnClick} class="${downloadClass}" style="border: none;">
+                                📥 Tải về
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+
+            // 3. Render Pagination Info & Controls
+            paginationControls.style.display = 'flex';
+            
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = Math.min(startIndex + pageSize, filteredCount);
+            
+            let filterSuffix = '';
+            if (searchQuery.trim() !== '') {
+                filterSuffix = ` (lọc từ ${totalCount})`;
+            }
+            document.getElementById('pagination-info').innerHTML = 
+                `Hiển thị <b>${filteredCount ? startIndex + 1 : 0}</b> - <b>${endIndex}</b> trong số <b>${filteredCount}</b> file${filterSuffix}`;
+
+            // Generate pagination buttons
+            const totalPages = Math.ceil(filteredCount / pageSize) || 1;
+            const buttonsContainer = document.getElementById('pagination-buttons');
+            let buttonsHtml = '';
+
+            // Previous Button
+            const prevDisabled = currentPage === 1 ? 'disabled' : '';
+            buttonsHtml += `<button class="page-btn ${prevDisabled}" onclick="changePage(${currentPage - 1})">Trước</button>`;
+
+            // Page numbers
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+            if (endPage - startPage + 1 < maxVisiblePages) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            if (startPage > 1) {
+                buttonsHtml += `<button class="page-btn" onclick="changePage(1)">1</button>`;
+                if (startPage > 2) {
+                    buttonsHtml += `<span class="page-ellipsis">...</span>`;
+                }
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                const activeClass = i === currentPage ? 'active' : '';
+                buttonsHtml += `<button class="page-btn ${activeClass}" onclick="changePage(${i})">${i}</button>`;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    buttonsHtml += `<span class="page-ellipsis">...</span>`;
+                }
+                buttonsHtml += `<button class="page-btn" onclick="changePage(${totalPages})">${totalPages}</button>`;
+            }
+
+            // Next Button
+            const nextDisabled = currentPage === totalPages ? 'disabled' : '';
+            buttonsHtml += `<button class="page-btn ${nextDisabled}" onclick="changePage(${currentPage + 1})">Sau</button>`;
+
+            buttonsContainer.innerHTML = buttonsHtml;
         }
 
         async function handleDownload(packetCode, hasPassword) {
@@ -973,14 +1237,68 @@ async fn index_handler() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ListQuery {
+    pub search: Option<String>,
+    pub page: Option<usize>,
+    pub limit: Option<usize>,
+}
+
 async fn list_uploads(
+    axum::extract::Query(query): axum::extract::Query<ListQuery>,
     State(state): State<Arc<RwLock<ServerState>>>,
-) -> Json<Vec<UploadInfo>> {
+) -> Json<serde_json::Value> {
     let lock = state.read().await;
     let mut list: Vec<UploadInfo> = lock.uploads.values().cloned().collect();
+    
     // Sort by started_at descending
     list.sort_by(|a, b| b.started_at.cmp(&a.started_at));
-    Json(list)
+
+    // Stats calculated globally before filtering/pagination
+    let total_count = list.len();
+    let active_count = list.iter().filter(|u| u.status == "Đang nhận").count();
+    let total_bytes: u64 = list.iter().map(|u| u.bytes_received).sum();
+
+    // Filter by search query if provided
+    let mut filtered_list = if let Some(ref search_term) = query.search {
+        let term = search_term.trim().to_lowercase();
+        if term.is_empty() {
+            list
+        } else {
+            list.into_iter()
+                .filter(|u| {
+                    u.file_name.to_lowercase().contains(&term)
+                        || u.packet_code.to_lowercase().contains(&term)
+                })
+                .collect()
+        }
+    } else {
+        list
+    };
+
+    let filtered_count = filtered_list.len();
+
+    // Paginate
+    let page = query.page.unwrap_or(1);
+    let limit = query.limit.unwrap_or(10);
+    
+    let start_idx = if page > 0 { (page - 1) * limit } else { 0 };
+    let paginated_items = if start_idx < filtered_list.len() {
+        let end_idx = std::cmp::min(start_idx + limit, filtered_list.len());
+        filtered_list.drain(start_idx..end_idx).collect()
+    } else {
+        Vec::new()
+    };
+
+    Json(json!({
+        "items": paginated_items,
+        "total_count": total_count,
+        "filtered_count": filtered_count,
+        "page": page,
+        "limit": limit,
+        "total_bytes": total_bytes,
+        "active_count": active_count,
+    }))
 }
 
 async fn register_upload(
