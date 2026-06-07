@@ -218,21 +218,30 @@ Bạn có thể build tự động qua script (khuyên dùng) hoặc build thủ
     ./build_container.sh
     ```
 
-*   **Cách 2: Biên dịch thủ công (Nếu đã tự tạo base images `rtk.builder/base:latest` và `rtk.runtime/base:latest` trước đó):**
-    *   **Xây dựng Server Image (`rtk.udp/server`):**
-        ```bash
-        # Docker:
-        docker build -f server.Dockerfile -t rtk.udp/server .
-        # Podman:
-        podman build -f server.Dockerfile -t rtk.udp/server .
-        ```
-    *   **Xây dựng Client Image (`rtk.udp/client`):**
-        ```bash
-        # Docker:
-        docker build -f client.Dockerfile -t rtk.udp/client .
-        # Podman:
-        podman build -f client.Dockerfile -t rtk.udp/client .
-        ```
+*   **Cách 2: Biên dịch thủ công từng bước (Nếu không dùng script tự động):**
+    Bạn cần phải tự xây dựng các base image và cache image theo đúng thứ tự (thay thế `docker` bằng `podman` nếu cần):
+    ```bash
+    # Bước 1: Build các base image
+    docker build -f builder.Dockerfile -t rtk.builder/base:latest .
+    docker build -f runtime.Dockerfile -t rtk.runtime/base:latest .
+
+    # Bước 2: Build cache dependencies trung gian (Chạy cargo build dependencies)
+    docker build -f dep-cache.Dockerfile -t rtk.app/dep-cache:latest .
+    # (Tùy chọn) Lưu cache tar để tái sử dụng lần sau:
+    docker save rtk.app/dep-cache:latest -o .rtk-dep-cache.tar
+
+    # Bước 3: Build Server Image thành phẩm và xuất ra file tar
+    docker build -f server.Dockerfile -t rtk.udp/server .
+    docker save rtk.udp/server -o rtk-udp-server.tar
+    
+    # Bước 4: Build Client Image thành phẩm và xuất ra file tar
+    docker build -f client.Dockerfile -t rtk.udp/client .
+    docker save rtk.udp/client -o rtk-udp-client.tar
+
+    # Bước 5: Dọn dẹp các image để giải phóng dung lượng đĩa
+    docker rmi rtk.udp/server rtk.udp/client rtk.app/dep-cache:latest rtk.builder/base:latest rtk.runtime/base:latest
+    docker image prune -f
+    ```
 
 > [!IMPORTANT]
 > **Lưu ý về dung lượng đĩa:** Sau khi chạy biên dịch tự động qua `./build_container.sh`, toàn bộ các image build trung gian và image thành phẩm đều sẽ được tự động xóa khỏi Docker/Podman Engine để tiết kiệm dung lượng đĩa tối đa (chỉ giữ lại cục bộ dưới dạng các tệp `.tar`).
