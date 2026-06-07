@@ -45,6 +45,7 @@ ensure_base_images() {
             $ENGINE build -f builder.Dockerfile -t $BUILDER_TAG .
             if [ $? -eq 0 ]; then
                 echo -e "${GREEN}✔ Tạo thành công ${BUILDER_TAG}. Đang xuất tệp cache...${NC}"
+                rm -f "$BUILDER_TAR"
                 $ENGINE save $BUILDER_TAG -o $BUILDER_TAR
             else
                 echo -e "${RED}Lỗi: Không thể biên dịch Builder Base!${NC}"
@@ -66,6 +67,7 @@ ensure_base_images() {
             $ENGINE build -f runtime.Dockerfile -t $RUNTIME_TAG .
             if [ $? -eq 0 ]; then
                 echo -e "${GREEN}✔ Tạo thành công ${RUNTIME_TAG}. Đang xuất tệp cache...${NC}"
+                rm -f "$RUNTIME_TAR"
                 $ENGINE save $RUNTIME_TAG -o $RUNTIME_TAR
             else
                 echo -e "${RED}Lỗi: Không thể biên dịch Runtime Base!${NC}"
@@ -89,6 +91,7 @@ ensure_dep_cache() {
             $ENGINE build -f dep-cache.Dockerfile -t $APP_DEP_TAG .
             if [ $? -eq 0 ]; then
                 echo -e "${GREEN}✔ Tạo thành công ${APP_DEP_TAG}. Đang xuất tệp cache...${NC}"
+                rm -f "$APP_DEP_TAR"
                 $ENGINE save $APP_DEP_TAG -o $APP_DEP_TAR
             else
                 echo -e "${RED}Lỗi: Không thể biên dịch App Dependency Cache!${NC}"
@@ -110,6 +113,7 @@ build_server() {
     fi
 
     echo -e "${BLUE}→ 2. Lưu lại compile target và dependencies vào cache tar...${NC}"
+    rm -f "$APP_DEP_TAR"
     $ENGINE save $APP_DEP_TAG -o $APP_DEP_TAR
 
     echo -e "${BLUE}→ 3. Xây dựng Server Image (rtk.udp/server)...${NC}"
@@ -117,6 +121,7 @@ build_server() {
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✔ Build rtk.udp/server thành công!${NC}"
         echo -e "${BLUE}→ 4. Đang xuất thành phẩm ra tệp rtk-udp-server.tar...${NC}"
+        rm -f rtk-udp-server.tar
         $ENGINE save rtk.udp/server -o rtk-udp-server.tar
         echo -e "${GREEN}✔ Đã lưu rtk-udp-server.tar thành công.${NC}"
     else
@@ -137,6 +142,7 @@ build_client() {
     fi
 
     echo -e "${BLUE}→ 2. Lưu lại compile target và dependencies vào cache tar...${NC}"
+    rm -f "$APP_DEP_TAR"
     $ENGINE save $APP_DEP_TAG -o $APP_DEP_TAR
 
     echo -e "${BLUE}→ 3. Xây dựng Client Image (rtk.udp/client)...${NC}"
@@ -144,6 +150,7 @@ build_client() {
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✔ Build rtk.udp/client thành công!${NC}"
         echo -e "${BLUE}→ 4. Đang xuất thành phẩm ra tệp rtk-udp-client.tar...${NC}"
+        rm -f rtk-udp-client.tar
         $ENGINE save rtk.udp/client -o rtk-udp-client.tar
         echo -e "${GREEN}✔ Đã lưu rtk-udp-client.tar thành công.${NC}"
     else
