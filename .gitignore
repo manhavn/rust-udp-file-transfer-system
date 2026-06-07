@@ -3,7 +3,7 @@
 
 # Local test data and uploads
 /uploads
-/demo_data.bin
+/*.bin
 
 # OS metadata
 .DS_Store
