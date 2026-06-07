@@ -355,50 +355,45 @@ fun UdpUploadScreen(
             )
         }
 
-        Row(
+        OutlinedTextField(
+            value = blockSizeStr,
+            onValueChange = { 
+                blockSizeStr = it 
+                sharedPreferences.edit().putString("block_size", it).apply()
+            },
+            label = { Text("Kích thước Block (bytes)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = blockSizeStr,
-                onValueChange = { 
-                    blockSizeStr = it 
-                    sharedPreferences.edit().putString("block_size", it).apply()
-                },
-                label = { Text("Kích thước Block (bytes)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1.5f),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                    unfocusedBorderColor = Color.Gray
-                )
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.secondary,
+                unfocusedBorderColor = Color.Gray
             )
+        )
 
-            OutlinedTextField(
-                value = password,
-                onValueChange = { 
-                    password = it 
-                    sharedPreferences.edit().putString("password", it).apply()
-                },
-                label = { Text("Mật khẩu (Tùy chọn)") },
-                visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    TextButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                        Text(
-                            text = if (isPasswordVisible) "Ẩn" else "Hiện",
-                            color = MaterialTheme.colorScheme.secondary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                    }
-                },
-                modifier = Modifier.weight(1.5f),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                    unfocusedBorderColor = Color.Gray
-                )
+        OutlinedTextField(
+            value = password,
+            onValueChange = { 
+                password = it 
+                sharedPreferences.edit().putString("password", it).apply()
+            },
+            label = { Text("Mật khẩu (Tùy chọn)") },
+            visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                    Text(
+                        text = if (isPasswordVisible) "Ẩn" else "Hiện",
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.secondary,
+                unfocusedBorderColor = Color.Gray
             )
-        }
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
 
