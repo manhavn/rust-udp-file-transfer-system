@@ -255,9 +255,42 @@ Bạn có thể build tự động qua script (khuyên dùng) hoặc build thủ
 >     *   Podman: `podman load -i rtk-udp-client.tar`
 
 #### 2. Khởi chạy Container (Run):
-Khi chạy container, bạn có thể truyền các biến môi trường để tùy chỉnh cấu hình và gắn volume (ổ đĩa mạng) để lưu trữ tệp tin và dữ liệu SQLite một cách bền vững trên máy host.
+Để đơn giản hóa việc khởi chạy (như tự động nạp ảnh từ tệp `.tar`, ánh xạ các thư mục volume, cấu hình cổng và chuyển đổi đường dẫn tuyệt đối cho tệp gửi), hệ thống cung cấp sẵn các kịch bản chạy trong các thư mục `docker/` và `podman/`.
 
-*   **Chạy mặc định (Tự động lưu uploads/db vào volume):**
+##### Cách 1: Sử dụng các kịch bản chạy tự động (Khuyên dùng):
+Các kịch bản này sẽ tự động kiểm tra và nạp ảnh từ tệp `.tar` nếu chưa có trong registry, tự động ánh xạ ổ đĩa volume và chuyển đổi đường dẫn file gửi tương ứng.
+
+*   **Sử dụng Docker:**
+    *   **Khởi chạy Server:**
+        ```bash
+        ./docker/run_server.sh [các tham số cấu hình bổ sung...]
+        # Ví dụ với đầy đủ tham số:
+        ./docker/run_server.sh --udp-port 5000 --http-port 8080 --disable-request-log
+        ```
+    *   **Khởi chạy Client (Gửi file):**
+        ```bash
+        ./docker/run_client.sh <đường_dẫn_file> [các tham số CLI bổ sung...]
+        # Ví dụ gửi tệp tin với cấu hình đầy đủ:
+        ./docker/run_client.sh video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+        ```
+*   **Sử dụng Podman:**
+    *   **Khởi chạy Server:**
+        ```bash
+        ./podman/run_server.sh [các tham số cấu hình bổ sung...]
+        # Ví dụ với đầy đủ tham số:
+        ./podman/run_server.sh --udp-port 5000 --http-port 8080 --disable-request-log
+        ```
+    *   **Khởi chạy Client (Gửi file):**
+        ```bash
+        ./podman/run_client.sh <đường_dẫn_file> [các tham số CLI bổ sung...]
+        # Ví dụ gửi tệp tin với cấu hình đầy đủ:
+        ./podman/run_client.sh video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+        ```
+
+##### Cách 2: Khởi chạy bằng lệnh Docker/Podman thô (Thủ công):
+*(Lưu ý: Bạn phải nạp ảnh từ tệp `.tar` trước bằng lệnh `docker load -i <file.tar>` hoặc `podman load -i <file.tar>` trước khi chạy các lệnh này).*
+
+*   **Khởi chạy Server mặc định:**
     *   **Docker:**
         ```bash
         docker run -d \
@@ -280,7 +313,7 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
         ```
         *(Lưu ý đối với Podman trên các hệ thống Linux bật SELinux, hậu tố `:Z` là bắt buộc để phân quyền volume).*
 
-*   **Chạy với cấu hình đầy đủ tất cả các biến môi trường (Full Environment Variables):**
+*   **Khởi chạy Server với cấu hình đầy đủ tất cả các biến môi trường (Full ENV):**
     *   **Docker:**
         ```bash
         docker run -d \
@@ -317,9 +350,8 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
           -v $(pwd)/db:/app/db:Z \
           rtk.udp/server
         ```
-        *(Lưu ý đối với Podman trên các hệ thống Linux bật SELinux, hậu tố `:Z` là bắt buộc để phân quyền volume).*
 
-#### 3. Khởi chạy Client (Gửi file qua Container):
+#### 3. Khởi chạy Client bằng lệnh Container thô (Gửi file):
 Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume Mount) tệp tin hoặc thư mục chứa tệp tin vào trong Container. Nên sử dụng chế độ chỉ đọc (`:ro`) để bảo vệ dữ liệu gốc trên máy host.
 
 *   **Sử dụng Docker:**
