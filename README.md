@@ -205,25 +205,32 @@ Cả Server và Client đều hỗ trợ đọc các giá trị cấu hình từ
 ---
 
 ### 4.5. Khởi chạy với Docker hoặc Podman (Container Deployment)
-Hệ thống cung cấp sẵn hai tệp `server.Dockerfile` và `client.Dockerfile` ở thư mục root giúp bạn dễ dàng đóng gói và khởi chạy Server cũng như Client trên bất kỳ môi trường hỗ trợ container nào (như Docker, Podman).
+Hệ thống hỗ trợ đóng gói và chạy Server cũng như Client trên bất kỳ môi trường container nào.
+
+Để tối ưu hóa thời gian biên dịch, hệ thống áp dụng cơ chế **Cache Base Images** tương tự như quy trình triển khai của các hệ thống Production lớn. Gói cài đặt các package hệ thống (`musl-dev`, `build-base` cho builder và `ca-certificates` cho runtime) sẽ được đóng gói một lần thành các tệp `.tar` cục bộ. Trong những lần build tiếp theo, Docker/Podman sẽ tự động nạp lại từ tệp tar này mà không cần truy vấn tải lại từ internet.
 
 #### 1. Xây dựng Docker Image (Build):
-*   **Xây dựng Server Image (`rtk-udp-server`):**
-    *   **Sử dụng Docker:**
+Bạn có thể build tự động qua script (khuyên dùng) hoặc build thủ công:
+
+*   **Cách 1: Khởi chạy biên dịch tự động qua Script Cache (Khuyên dùng):**
+    Script sẽ tự động phát hiện Docker/Podman, tạo và lưu cache base images (`builder.Dockerfile` và `runtime.Dockerfile` dưới dạng `.tar` ẩn), rồi hiển thị menu để build Server/Client tương ứng:
+    ```bash
+    ./build_container.sh
+    ```
+
+*   **Cách 2: Biên dịch thủ công (Nếu đã tự tạo base images `rtk-builder-base:latest` và `rtk-runtime-base:latest` trước đó):**
+    *   **Xây dựng Server Image (`rtk-udp-server`):**
         ```bash
+        # Docker:
         docker build -f server.Dockerfile -t rtk-udp-server .
-        ```
-    *   **Sử dụng Podman:**
-        ```bash
+        # Podman:
         podman build -f server.Dockerfile -t rtk-udp-server .
         ```
-*   **Xây dựng Client Image (`rtk-udp-client`):**
-    *   **Sử dụng Docker:**
+    *   **Xây dựng Client Image (`rtk-udp-client`):**
         ```bash
+        # Docker:
         docker build -f client.Dockerfile -t rtk-udp-client .
-        ```
-    *   **Sử dụng Podman:**
-        ```bash
+        # Podman:
         podman build -f client.Dockerfile -t rtk-udp-client .
         ```
 
