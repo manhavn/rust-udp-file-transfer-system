@@ -23,4 +23,4 @@ echo Thư mục upload: .\uploads
 echo Cơ sở dữ liệu: .\db\data.sqlite
 echo ==========================================================
 
-%BINARY% %*
+%BINARY% --disable-request-log %*

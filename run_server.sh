@@ -22,5 +22,5 @@ echo "Thư mục upload: ./uploads"
 echo "Cơ sở dữ liệu: ./db/data.sqlite"
 echo "=========================================================="
 
-# Chạy server và chuyển tiếp toàn bộ tham số truyền vào
-exec $BINARY "$@"
+# Chạy server và chuyển tiếp toàn bộ tham số truyền vào, mặc định tắt HTTP request log
+exec $BINARY --disable-request-log "$@"
