@@ -5,6 +5,8 @@
     
     <application
         android:label="UDP TRANSFER CLIENT"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true">
         <activity
             android:name=".MainActivity"
