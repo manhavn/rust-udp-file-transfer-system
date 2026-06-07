@@ -26,12 +26,12 @@ case $choice in
         TARGET_DESC="Hệ điều hành hiện tại (Native)"
         ;;
     2)
-        TARGET="x86_64-unknown-linux-gnu"
-        TARGET_DESC="Linux x86_64"
+        TARGET="x86_64-unknown-linux-musl"
+        TARGET_DESC="Linux x86_64 (Tĩnh - Tương thích mọi Linux Distro)"
         ;;
     3)
-        TARGET="aarch64-unknown-linux-gnu"
-        TARGET_DESC="Linux aarch64 (ARM64)"
+        TARGET="aarch64-unknown-linux-musl"
+        TARGET_DESC="Linux aarch64 (ARM64 - Tĩnh - Tương thích mọi Linux Distro)"
         ;;
     4)
         TARGET="x86_64-pc-windows-gnu"
@@ -89,6 +89,8 @@ else
         echo -e "${YELLOW}Lưu ý: Để build cho Windows trên Linux, bạn cần cài đặt bộ biên dịch chéo: sudo apt install mingw-w64${NC}"
     elif [[ "$TARGET" == *"darwin"* ]]; then
         echo -e "${YELLOW}Lưu ý: Biên dịch chéo sang macOS từ hệ điều hành khác cần có SDK macOS và công cụ osxcross.${NC}"
+    elif [[ "$TARGET" == *"musl"* ]]; then
+        echo -e "${YELLOW}Lưu ý: Để build tĩnh (musl) trên Linux, bạn cần cài đặt musl-tools và gcc-multilib: sudo apt install musl-tools musl-dev${NC}"
     fi
     exit 1
 fi

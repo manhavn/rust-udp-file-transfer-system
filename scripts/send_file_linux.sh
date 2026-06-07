@@ -16,6 +16,14 @@ if [ -f "./target/release/client_cli" ]; then
     BINARY="./target/release/client_cli"
 elif [ -f "../target/release/client_cli" ]; then
     BINARY="../target/release/client_cli"
+elif [ -f "./target/x86_64-unknown-linux-musl/release/client_cli" ]; then
+    BINARY="./target/x86_64-unknown-linux-musl/release/client_cli"
+elif [ -f "../target/x86_64-unknown-linux-musl/release/client_cli" ]; then
+    BINARY="../target/x86_64-unknown-linux-musl/release/client_cli"
+elif [ -f "./target/aarch64-unknown-linux-musl/release/client_cli" ]; then
+    BINARY="./target/aarch64-unknown-linux-musl/release/client_cli"
+elif [ -f "../target/aarch64-unknown-linux-musl/release/client_cli" ]; then
+    BINARY="../target/aarch64-unknown-linux-musl/release/client_cli"
 elif [ -f "./client_cli" ]; then
     BINARY="./client_cli"
 else

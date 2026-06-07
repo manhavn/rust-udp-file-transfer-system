@@ -1,5 +1,8 @@
 # Stage 1: Build the Rust application
-FROM rust:1.75 AS builder
+FROM rust:alpine AS builder
+
+# Install build dependencies for C-based crates (e.g. SQLite bundled build)
+RUN apk add --no-cache musl-dev build-base
 
 WORKDIR /usr/src/app
 COPY . .
@@ -8,10 +11,10 @@ COPY . .
 RUN cargo build --release --bin server
 
 # Stage 2: Create a minimal runner image
-FROM debian:bookworm-slim
+FROM alpine:latest
 
 # Install ca-certificates for secure HTTP requests
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 
