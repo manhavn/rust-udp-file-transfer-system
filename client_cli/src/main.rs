@@ -133,6 +133,8 @@ async fn main() -> Result<(), String> {
         .unwrap_or("unknown")
         .to_string();
 
+    let mut seek_begin = 0u64;
+
     // 2. HTTP Register
     let client = reqwest::Client::new();
     let register_url = format!("http://{}:{}/api/register", args.server_ip, args.http_port);
@@ -151,12 +153,20 @@ async fn main() -> Result<(), String> {
         Ok(resp) => {
             if resp.status().is_success() {
                 println!("   -> Đăng ký thành công trên Server.");
+                if let Ok(json) = resp.json::<serde_json::Value>().await {
+                    if let Some(offset) = json.get("bytes_received").and_then(|v| v.as_u64()) {
+                        if offset > 0 {
+                            println!("   -> Phát hiện tệp tải lên dang dở. Sẽ tiếp tục truyền từ byte thứ {} ({:.2}%)", offset, (offset as f64 / file_size as f64) * 100.0);
+                            seek_begin = offset;
+                        }
+                    }
+                }
             } else {
                 eprintln!("   -> [Cảnh báo] Đăng ký HTTP không thành công: Code {}", resp.status());
             }
         }
         Err(e) => {
-            eprintln!("   -> [Cảnh báo] Lỗi kết nối HTTP đăng ký: {}. Sẽ truyền trực tiếp qua UDP.", e);
+            eprintln!("   -> [Cảnh báo] Lỗi kết nối HTTP đăng ký: {}. Sẽ truyền trực tiếp qua UDP từ byte 0.", e);
         }
     }
 
@@ -171,7 +181,6 @@ async fn main() -> Result<(), String> {
 
     println!("3. Bắt đầu truyền dữ liệu qua UDP...");
     let mut buffer = vec![0u8; args.block_size];
-    let mut seek_begin = 0u64;
 
     while seek_begin < file_size {
         file.seek(SeekFrom::Start(seek_begin)).map_err(|e| format!("Seek thất bại: {}", e))?;

@@ -143,6 +143,8 @@ pub extern "C" fn rtk_upload_file(
             .unwrap_or("unknown")
             .to_string();
 
+        let mut seek_begin = 0u64;
+
         // HTTP Registration
         let client = reqwest::Client::new();
         let register_url = format!("http://{}:{}/api/register", server_ip_str, http_port);
@@ -157,10 +159,13 @@ pub extern "C" fn rtk_upload_file(
             .await;
 
         // Note: we warn but do not strictly abort if registration fails, to support direct UDP transmission fallback.
-        let mut _registered = false;
         if let Ok(resp) = reg_res {
             if resp.status().is_success() {
-                _registered = true;
+                if let Ok(json) = resp.json::<serde_json::Value>().await {
+                    if let Some(offset) = json.get("bytes_received").and_then(|v| v.as_u64()) {
+                        seek_begin = offset;
+                    }
+                }
             }
         }
 
@@ -178,7 +183,6 @@ pub extern "C" fn rtk_upload_file(
 
         // Transmission loop
         let mut buffer = vec![0u8; block_size];
-        let mut seek_begin = 0u64;
 
         while seek_begin < file_size {
             if file.seek(SeekFrom::Start(seek_begin)).is_err() {

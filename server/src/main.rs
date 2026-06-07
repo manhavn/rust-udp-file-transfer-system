@@ -580,32 +580,61 @@ async fn register_upload(
     Json(payload): Json<RegisterRequest>,
 ) -> Json<serde_json::Value> {
     let mut lock = state.write().await;
+    let file_path = std::path::Path::new(&lock.upload_dir).join(&payload.file_name);
+    
+    // Check if the upload already exists and determine the safe resume offset
+    let (bytes_received, status) = if let Some(existing) = lock.uploads.get(&payload.packet_code) {
+        let disk_size = if file_path.exists() {
+            file_path.metadata().map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+        // The resume point is the minimum of what we recorded and what is actually on disk
+        let resume_offset = existing.bytes_received.min(disk_size);
+        (resume_offset, existing.status.clone())
+    } else {
+        (0, "Đang nhận".to_string())
+    };
+
     let started_at = Utc::now();
     let info = UploadInfo {
         packet_code: payload.packet_code.clone(),
         file_name: payload.file_name.clone(),
         file_size: payload.file_size,
-        bytes_received: 0,
-        status: "Đang nhận".to_string(),
+        bytes_received,
+        status: status.clone(),
         started_at,
-        completed_at: None,
+        completed_at: if status == "Hoàn thành" { Some(started_at) } else { None },
     };
     lock.uploads.insert(payload.packet_code.clone(), info);
 
-    let file_path = std::path::Path::new(&lock.upload_dir).join(&payload.file_name);
-    if let Some(parent) = file_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-
-    if let Ok(file) = std::fs::File::create(&file_path) {
-        let _ = file.set_len(payload.file_size);
+    // Only create/truncate the file if it's a fresh upload
+    if bytes_received == 0 {
+        if let Some(parent) = file_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(file) = std::fs::File::create(&file_path) {
+            let _ = file.set_len(payload.file_size);
+        }
+    } else {
+        // If resuming, just ensure the file exists
+        if !file_path.exists() {
+            if let Some(parent) = file_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(file) = std::fs::File::create(&file_path) {
+                let _ = file.set_len(payload.file_size);
+            }
+        }
     }
     
-    println!("[HTTP] Registered upload. File: {}, Size: {}, Hash ID: {}", payload.file_name, payload.file_size, payload.packet_code);
+    println!("[HTTP] Registered upload. File: {}, Size: {}, Hash ID: {}, Resume Offset: {}", 
+             payload.file_name, payload.file_size, payload.packet_code, bytes_received);
 
     Json(json!({
         "status": "registered",
-        "packet_code": payload.packet_code
+        "packet_code": payload.packet_code,
+        "bytes_received": bytes_received
     }))
 }
 
