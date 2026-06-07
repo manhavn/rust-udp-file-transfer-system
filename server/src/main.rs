@@ -699,9 +699,8 @@ const INDEX_HTML: &str = r#"
             }
         }
 
-        // Auto fetch every 1.5 seconds
+        // Load data once on page load (manual refresh/F5 will reload)
         fetchUploads();
-        setInterval(fetchUploads, 5000);
     </script>
 </body>
 </html>
