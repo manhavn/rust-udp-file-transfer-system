@@ -477,7 +477,7 @@ const INDEX_HTML: &str = r#"
             return `${diffMins} phút ${diffSecs % 60} giây`;
         }
 
-        async fn fetchUploads() {
+        async function fetchUploads() {
             try {
                 const response = await fetch('/api/list');
                 const data = await response.json();
