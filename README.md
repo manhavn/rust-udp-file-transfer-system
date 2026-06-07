@@ -77,6 +77,8 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
 *   `--completed-timeout`: Thời gian tối đa lưu giữ tệp đã hoàn thành (đơn vị: phút).
 *   `--udp-port`: Cổng UDP để nhận dữ liệu.
 *   `--http-port`: Cổng HTTP chạy dashboard REST API.
+*   `--upload-dir`: Đường dẫn thư mục lưu trữ các tệp tải lên (mặc định: `./uploads`).
+*   `--db-path`: Đường dẫn tệp cơ sở dữ liệu SQLite (mặc định: `./db/data.sqlite`).
 *   `--disable-request-log`: Tắt toàn bộ output log request của HTTP server và các log tiến trình/lỗi của UDP server (mặc định server sẽ bật log).
 
 **Ví dụ chạy Server (Quét dọn dẹp mỗi 3 phút, lưu tệp dở dang tối đa 30 phút, lưu tệp hoàn thành tối đa 20 phút):**

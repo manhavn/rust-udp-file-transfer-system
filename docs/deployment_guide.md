@@ -19,7 +19,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/rtk-udp-server
-# Ví dụ: ExecStart=/opt/rtk-udp-server/server --cleanup-interval 5 --disable-request-log
+# Ví dụ: ExecStart=/opt/rtk-udp-server/server --cleanup-interval 5 --disable-request-log --upload-dir /var/uploads --db-path /var/db/data.sqlite
 ExecStart=/opt/rtk-udp-server/server
 Restart=always
 RestartSec=5

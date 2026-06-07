@@ -13,13 +13,30 @@ else
     exit 1
 fi
 
-# Tự động tạo các thư mục cần thiết cho production nếu chưa có
-mkdir -p ./uploads ./db
+# Thiết lập cấu hình mặc định
+UPLOAD_DIR="./uploads"
+DB_PATH="./db/data.sqlite"
+
+# Phân tích tham số để lấy upload-dir và db-path nếu có truyền vào
+args_list=("$@")
+for ((i=0; i<${#args_list[@]}; i++)); do
+    if [ "${args_list[i]}" = "--upload-dir" ]; then
+        UPLOAD_DIR="${args_list[i+1]}"
+    elif [ "${args_list[i]}" = "--db-path" ]; then
+        DB_PATH="${args_list[i+1]}"
+    fi
+done
+
+# Lấy thư mục chứa database
+DB_DIR=$(dirname "$DB_PATH")
+
+# Tự động tạo các thư mục cần thiết
+mkdir -p "$UPLOAD_DIR" "$DB_DIR"
 
 echo "=========================================================="
 echo "Khởi chạy RTK UDP Server ở chế độ Production..."
-echo "Thư mục upload: ./uploads"
-echo "Cơ sở dữ liệu: ./db/data.sqlite"
+echo "Thư mục upload: $UPLOAD_DIR"
+echo "Cơ sở dữ liệu: $DB_PATH"
 echo "=========================================================="
 
 # Chạy server và chuyển tiếp toàn bộ tham số truyền vào, mặc định tắt HTTP request log
