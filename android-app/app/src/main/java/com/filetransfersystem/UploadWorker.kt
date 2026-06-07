@@ -29,6 +29,7 @@ class UploadWorker(
         // Output/Progress Keys
         const val KEY_RESULT_CODE = "result_code"
         const val KEY_ERROR_MESSAGE = "error_message"
+        const val KEY_FILE_HASH = "file_hash"
     }
 
     override suspend fun doWork(): Result {
@@ -73,7 +74,9 @@ class UploadWorker(
             )
         }
 
-        Log.i(TAG, "Starting UDP file upload: ${file.name} (${file.length()} bytes) to $serverIp:$udpPort")
+        val fileHash = RustUploader.calculateSHA256(filePath)
+        val hashId = RustUploader.calculateHashId(filePath)
+        Log.i(TAG, "Starting UDP file upload: ${file.name} (${file.length()} bytes) to $serverIp:$udpPort. Hash ID: $hashId, SHA-256: $fileHash")
         
         try {
             // Call the Rust library wrapper
@@ -87,8 +90,13 @@ class UploadWorker(
             )
 
             return if (resultCode == 0) {
-                Log.i(TAG, "Upload completed successfully!")
-                Result.success(workDataOf(KEY_RESULT_CODE to resultCode))
+                Log.i(TAG, "Upload completed successfully! File: ${file.name}, Hash ID: $hashId")
+                Result.success(
+                    workDataOf(
+                        KEY_RESULT_CODE to resultCode,
+                        KEY_FILE_HASH to hashId
+                    )
+                )
             } else {
                 val errorMsg = when (resultCode) {
                     -1 -> "Invalid parameters passed to Rust library"
@@ -101,20 +109,22 @@ class UploadWorker(
                     -99 -> "Rust library: Native library call crashed"
                     else -> "Unknown error code: $resultCode"
                 }
-                Log.e(TAG, "Upload failed: $errorMsg (code: $resultCode)")
+                Log.e(TAG, "Upload failed: $errorMsg (code: $resultCode). File: ${file.name}, Hash ID: $hashId")
                 Result.failure(
                     workDataOf(
                         KEY_RESULT_CODE to resultCode,
-                        KEY_ERROR_MESSAGE to errorMsg
+                        KEY_ERROR_MESSAGE to errorMsg,
+                        KEY_FILE_HASH to hashId
                     )
                 )
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "Unexpected error executing Rust FFI upload in Worker", e)
+            Log.e(TAG, "Unexpected error executing Rust FFI upload in Worker for file: ${file.name}, Hash ID: $hashId", e)
             return Result.failure(
                 workDataOf(
                     KEY_RESULT_CODE to -97,
-                    KEY_ERROR_MESSAGE to "FFI exception: ${e.message}"
+                    KEY_ERROR_MESSAGE to "FFI exception: ${e.message}",
+                    KEY_FILE_HASH to hashId
                 )
             )
         }

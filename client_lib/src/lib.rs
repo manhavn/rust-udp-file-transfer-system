@@ -270,3 +270,56 @@ pub extern "C" fn rtk_upload_file_with_password(
         0 // Success
     })
 }
+
+#[no_mangle]
+pub extern "C" fn rtk_calculate_hash_id(
+    c_file_path: *const c_char,
+    out_buf: *mut c_char,
+    max_len: usize,
+) -> i32 {
+    if c_file_path.is_null() || out_buf.is_null() || max_len == 0 {
+        return -1;
+    }
+
+    let file_path_str = unsafe {
+        match CStr::from_ptr(c_file_path).to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
+    };
+
+    let path = Path::new(file_path_str);
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return -2,
+    };
+
+    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+    let mut hash_buf = vec![0u8; 65536];
+    loop {
+        let n = match file.read(&mut hash_buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => return -3,
+        };
+        hasher.update(&hash_buf[..n]);
+    }
+    let hash_result = hasher.digest();
+    let hash_bytes = hash_result.to_be_bytes();
+
+    let packet_code_bytes = common::generate_packet_code_from_hash(&hash_bytes);
+    let packet_code_str = common::bytes_to_unique_id(&packet_code_bytes);
+
+    let bytes = packet_code_str.as_bytes();
+    if bytes.len() >= max_len {
+        return -8; // Buffer too small
+    }
+
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf as *mut u8, bytes.len());
+        // Null-terminate the string
+        std::ptr::write(out_buf.add(bytes.len()), 0);
+    }
+
+    0 // Success
+}
