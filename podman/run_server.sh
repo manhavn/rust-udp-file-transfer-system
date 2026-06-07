@@ -17,6 +17,9 @@ if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     echo ""
     echo "Ví dụ chạy tùy biến cổng:"
     echo "  UDP_PORT=5005 HTTP_PORT=8085 $0"
+    echo ""
+    echo "Ví dụ cấu hình đầy đủ biến môi trường (Full ENV Example):"
+    echo "  UDP_PORT=5000 HTTP_PORT=8080 UPLOAD_DIR=./uploads DB_PATH=./db/data.sqlite CLEANUP_INTERVAL=5 INCOMPLETE_TIMEOUT=60 COMPLETED_TIMEOUT=15 DISABLE_REQUEST_LOG=false $0"
     exit 0
 fi
 

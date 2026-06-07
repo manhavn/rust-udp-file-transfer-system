@@ -17,6 +17,9 @@ if [ -z "$1" ] || [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     echo ""
     echo "Ví dụ gửi file có mật khẩu:"
     echo "  SERVER_IP=192.168.1.100 DOWNLOAD_PASSWORD=mysecret123 $0 video.mp4"
+    echo ""
+    echo "Ví dụ cấu hình đầy đủ biến môi trường (Full ENV Example):"
+    echo "  SERVER_IP=192.168.1.100 UDP_PORT=5000 HTTP_PORT=8080 BLOCK_SIZE=16384 LOG_PROGRESS=true DOWNLOAD_PASSWORD=mysecret123 $0 video.mp4"
     exit 1
 fi
 
