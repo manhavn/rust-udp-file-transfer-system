@@ -1182,6 +1182,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                             let db_path = lock.db_path.clone();
                             let completed_timeout = lock.completed_timeout_mins;
                             let incomplete_timeout = lock.incomplete_timeout_mins;
+                            let disable_log = lock.disable_request_log;
                             if let Some(entry) = lock.uploads.get_mut(&unique_id) {
                                 if is_end {
                                     entry.status = "Hoàn thành".to_string();
@@ -1189,7 +1190,9 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     entry.file_size = packet.seek_begin;
                                     entry.bytes_received = packet.seek_begin;
                                     entry.delete_at = Some(Utc::now() + chrono::Duration::minutes(completed_timeout));
-                                    println!("[UDP] Completed upload of file: {}", entry.file_name);
+                                    if !disable_log {
+                                        println!("[UDP] Completed upload of file: {}", entry.file_name);
+                                    }
                                 } else {
                                     let end_pos = packet.seek_begin + packet.data.len() as u64;
                                     if end_pos > entry.bytes_received {
@@ -1220,7 +1223,10 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[UDP] Error parsing packet: {}", e);
+                        let disable_log = state.read().await.disable_request_log;
+                        if !disable_log {
+                            eprintln!("[UDP] Error parsing packet: {}", e);
+                        }
                     }
                 }
             }
@@ -1228,7 +1234,10 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                 tokio::time::sleep(std::time::Duration::from_millis(2)).await;
             }
             Err(e) => {
-                eprintln!("[UDP] Recv error: {}", e);
+                let disable_log = state.read().await.disable_request_log;
+                if !disable_log {
+                    eprintln!("[UDP] Recv error: {}", e);
+                }
             }
         }
     }
