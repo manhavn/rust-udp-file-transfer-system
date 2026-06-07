@@ -24,6 +24,7 @@ pub struct UploadInfo {
     pub status: String, // "Đang nhận" or "Hoàn thành"
     pub started_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
+    pub delete_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -78,7 +79,8 @@ fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
             bytes_received INTEGER NOT NULL,
             status TEXT NOT NULL,
             started_at TEXT NOT NULL,
-            completed_at TEXT
+            completed_at TEXT,
+            delete_at TEXT
         )",
         [],
     )?;
@@ -87,16 +89,23 @@ fn init_db(db_path: &str) -> Result<(), rusqlite::Error> {
 
 fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
-    let mut stmt = conn.prepare("SELECT packet_code, file_name, file_size, bytes_received, status, started_at, completed_at FROM uploads")?;
+    let mut stmt = conn.prepare("SELECT packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at FROM uploads")?;
     let upload_iter = stmt.query_map([], |row| {
         let started_at_str: String = row.get(5)?;
         let completed_at_str: Option<String> = row.get(6)?;
+        let delete_at_str: Option<String> = row.get(7)?;
 
         let started_at = DateTime::parse_from_rfc3339(&started_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
 
         let completed_at = completed_at_str.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok()
+        });
+
+        let delete_at = delete_at_str.and_then(|s| {
             DateTime::parse_from_rfc3339(&s)
                 .map(|dt| dt.with_timezone(&Utc))
                 .ok()
@@ -110,6 +119,7 @@ fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, ru
             status: row.get(4)?,
             started_at,
             completed_at,
+            delete_at,
         })
     })?;
 
@@ -124,15 +134,16 @@ fn load_uploads_from_db(db_path: &str) -> Result<HashMap<String, UploadInfo>, ru
 fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
     conn.execute(
-        "INSERT INTO uploads (packet_code, file_name, file_size, bytes_received, status, started_at, completed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO uploads (packet_code, file_name, file_size, bytes_received, status, started_at, completed_at, delete_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(packet_code) DO UPDATE SET
             file_name = excluded.file_name,
             file_size = excluded.file_size,
             bytes_received = excluded.bytes_received,
             status = excluded.status,
             started_at = excluded.started_at,
-            completed_at = excluded.completed_at",
+            completed_at = excluded.completed_at,
+            delete_at = excluded.delete_at",
         rusqlite::params![
             info.packet_code,
             info.file_name,
@@ -141,6 +152,7 @@ fn save_upload_to_db(db_path: &str, info: &UploadInfo) -> Result<(), rusqlite::E
             info.status,
             info.started_at.to_rfc3339(),
             info.completed_at.map(|dt| dt.to_rfc3339()),
+            info.delete_at.map(|dt| dt.to_rfc3339()),
         ],
     )?;
     Ok(())
@@ -593,6 +605,20 @@ const INDEX_HTML: &str = r#"
             return `${diffMins} phút ${diffSecs % 60} giây`;
         }
 
+        function formatDeleteAt(deleteAtStr) {
+            if (!deleteAtStr) return '';
+            const deleteAt = new Date(deleteAtStr);
+            const now = new Date();
+            const diffMs = deleteAt - now;
+            const diffMins = Math.ceil(diffMs / (1000 * 60));
+            
+            if (diffMins <= 0) {
+                return `<span style="font-size: 0.82rem; color: var(--warning)">Đang xóa...</span>`;
+            }
+            
+            return `<span style="font-size: 0.82rem; color: #f43f5e; font-weight: 500;">Tự hủy: ${deleteAt.toLocaleTimeString('vi-VN')} (còn ${diffMins} phút)</span>`;
+        }
+
         async function fetchUploads() {
             try {
                 const response = await fetch('/api/list');
@@ -654,6 +680,7 @@ const INDEX_HTML: &str = r#"
                                      <span style="font-size: 0.85rem; color: var(--text-muted)">Bắt đầu: ${formatDateTime(upload.started_at)}</span>
                                      ${upload.completed_at ? `<span style="font-size: 0.85rem; color: var(--success); font-weight: 500;">Kết thúc: ${formatDateTime(upload.completed_at)}</span>` : ''}
                                      <span style="font-size: 0.85rem; color: var(--text-muted)">Thời gian truyền: ${calculateDuration(upload.started_at, upload.completed_at)}</span>
+                                     ${formatDeleteAt(upload.delete_at)}
                                  </div>
                              </td>
                             <td>
@@ -700,7 +727,7 @@ async fn register_upload(
     let file_path = std::path::Path::new(&lock.upload_dir).join(&payload.file_name);
     
     // Check if the upload already exists and determine the safe resume offset
-    let (bytes_received, status) = if let Some(existing) = lock.uploads.get(&payload.packet_code) {
+    let (bytes_received, status, delete_at) = if let Some(existing) = lock.uploads.get(&payload.packet_code) {
         let disk_size = if file_path.exists() {
             file_path.metadata().map(|m| m.len()).unwrap_or(0)
         } else {
@@ -708,9 +735,15 @@ async fn register_upload(
         };
         // The resume point is the minimum of what we recorded and what is actually on disk
         let resume_offset = existing.bytes_received.min(disk_size);
-        (resume_offset, existing.status.clone())
+        let new_delete_at = if existing.status == "Hoàn thành" {
+            Some(Utc::now() + chrono::Duration::minutes(lock.completed_timeout_mins))
+        } else {
+            Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins))
+        };
+        (resume_offset, existing.status.clone(), new_delete_at)
     } else {
-        (0, "Đang nhận".to_string())
+        let new_delete_at = Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins));
+        (0, "Đang nhận".to_string(), new_delete_at)
     };
 
     let started_at = Utc::now();
@@ -722,6 +755,7 @@ async fn register_upload(
         status: status.clone(),
         started_at,
         completed_at: if status == "Hoàn thành" { Some(started_at) } else { None },
+        delete_at,
     };
     lock.uploads.insert(payload.packet_code.clone(), info.clone());
 
@@ -776,41 +810,12 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
         let now = Utc::now();
         let mut to_delete = Vec::new();
 
-        let (incomplete_timeout_mins, completed_timeout_mins) = {
-            let lock = state.read().await;
-            (lock.incomplete_timeout_mins, lock.completed_timeout_mins)
-        };
-
         {
             let lock = state.read().await;
             for (code, upload) in &lock.uploads {
-                if upload.status == "Hoàn thành" {
-                    if let Some(completed_at) = upload.completed_at {
-                        if now.signed_duration_since(completed_at).num_minutes() >= completed_timeout_mins {
-                            to_delete.push((code.clone(), upload.file_name.clone(), true));
-                        }
-                    }
-                } else if upload.status == "Đang nhận" {
-                    // Check file modification time
-                    let file_path = std::path::Path::new(&lock.upload_dir).join(&upload.file_name);
-                    let mut is_old = false;
-                    if file_path.exists() {
-                        if let Ok(metadata) = file_path.metadata() {
-                            if let Ok(modified) = metadata.modified() {
-                                let modified_dt: DateTime<Utc> = modified.into();
-                                if now.signed_duration_since(modified_dt).num_minutes() >= incomplete_timeout_mins {
-                                    is_old = true;
-                                }
-                            }
-                        }
-                    } else {
-                        // If file doesn't exist on disk, we check if it started more than incomplete_timeout_mins ago
-                        if now.signed_duration_since(upload.started_at).num_minutes() >= incomplete_timeout_mins {
-                            is_old = true;
-                        }
-                    }
-                    if is_old {
-                        to_delete.push((code.clone(), upload.file_name.clone(), false));
+                if let Some(delete_at) = upload.delete_at {
+                    if now >= delete_at {
+                        to_delete.push((code.clone(), upload.file_name.clone(), upload.status == "Hoàn thành"));
                     }
                 }
             }
@@ -868,8 +873,10 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                         let unique_id = common::bytes_to_unique_id(packet.packet_code);
                         let is_end = packet.status == 0;
 
-                        let file_name = {
+                         let file_name = {
                             let mut lock = state.write().await;
+                            let incomplete_timeout = lock.incomplete_timeout_mins;
+                            let completed_timeout = lock.completed_timeout_mins;
                             let upload_dir = lock.upload_dir.clone();
                             let entry = lock.uploads.entry(unique_id.clone()).or_insert_with(|| {
                                 let name = format!("upload_{}.bin", unique_id);
@@ -878,6 +885,11 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     let _ = std::fs::create_dir_all(parent);
                                 }
                                 let _ = std::fs::File::create(&file_path);
+                                let delete_at = if is_end {
+                                    Some(Utc::now() + chrono::Duration::minutes(completed_timeout))
+                                } else {
+                                    Some(Utc::now() + chrono::Duration::minutes(incomplete_timeout))
+                                };
                                 UploadInfo {
                                     packet_code: unique_id.clone(),
                                     file_name: name.clone(),
@@ -886,6 +898,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     status: "Đang nhận".to_string(),
                                     started_at: Utc::now(),
                                     completed_at: None,
+                                    delete_at,
                                 }
                             });
                             entry.file_name.clone()
@@ -915,12 +928,15 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                         if write_success {
                             let mut lock = state.write().await;
                             let db_path = lock.db_path.clone();
+                            let completed_timeout = lock.completed_timeout_mins;
+                            let incomplete_timeout = lock.incomplete_timeout_mins;
                             if let Some(entry) = lock.uploads.get_mut(&unique_id) {
                                 if is_end {
                                     entry.status = "Hoàn thành".to_string();
                                     entry.completed_at = Some(Utc::now());
                                     entry.file_size = packet.seek_begin;
                                     entry.bytes_received = packet.seek_begin;
+                                    entry.delete_at = Some(Utc::now() + chrono::Duration::minutes(completed_timeout));
                                     println!("[UDP] Completed upload of file: {}", entry.file_name);
                                 } else {
                                     let end_pos = packet.seek_begin + packet.data.len() as u64;
@@ -930,6 +946,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     if entry.file_size < entry.bytes_received {
                                         entry.file_size = entry.bytes_received;
                                     }
+                                    entry.delete_at = Some(Utc::now() + chrono::Duration::minutes(incomplete_timeout));
                                 }
 
                                 // Save to SQLite
