@@ -205,17 +205,27 @@ Cả Server và Client đều hỗ trợ đọc các giá trị cấu hình từ
 ---
 
 ### 4.5. Khởi chạy với Docker hoặc Podman (Container Deployment)
-Hệ thống cung cấp sẵn một `Dockerfile` ở thư mục root giúp bạn dễ dàng đóng gói và khởi chạy Server trên bất kỳ môi trường hỗ trợ container nào (như Docker, Podman).
+Hệ thống cung cấp sẵn hai tệp `server.Dockerfile` và `client.Dockerfile` ở thư mục root giúp bạn dễ dàng đóng gói và khởi chạy Server cũng như Client trên bất kỳ môi trường hỗ trợ container nào (như Docker, Podman).
 
 #### 1. Xây dựng Docker Image (Build):
-*   **Sử dụng Docker:**
-    ```bash
-    docker build -t rtk-udp-server .
-    ```
-*   **Sử dụng Podman:**
-    ```bash
-    podman build -t rtk-udp-server .
-    ```
+*   **Xây dựng Server Image (`rtk-udp-server`):**
+    *   **Sử dụng Docker:**
+        ```bash
+        docker build -f server.Dockerfile -t rtk-udp-server .
+        ```
+    *   **Sử dụng Podman:**
+        ```bash
+        podman build -f server.Dockerfile -t rtk-udp-server .
+        ```
+*   **Xây dựng Client Image (`rtk-udp-client`):**
+    *   **Sử dụng Docker:**
+        ```bash
+        docker build -f client.Dockerfile -t rtk-udp-client .
+        ```
+    *   **Sử dụng Podman:**
+        ```bash
+        podman build -f client.Dockerfile -t rtk-udp-client .
+        ```
 
 #### 2. Khởi chạy Container (Run):
 Khi chạy container, bạn có thể truyền các biến môi trường để tùy chỉnh cấu hình và gắn volume (ổ đĩa mạng) để lưu trữ tệp tin và dữ liệu SQLite một cách bền vững trên máy host.
@@ -290,8 +300,8 @@ Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume
         ```bash
         docker run --rm -it \
           -v $(pwd):/data:ro \
-          rtk-udp-server \
-          /app/client_cli /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+          rtk-udp-client \
+          /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
         ```
     *   **Truyền đầy đủ cấu hình qua biến môi trường (ENV):**
         ```bash
@@ -303,8 +313,7 @@ Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume
           -e HTTP_PORT=8080 \
           -e BLOCK_SIZE=16384 \
           -e LOG_PROGRESS=true \
-          rtk-udp-server \
-          /app/client_cli
+          rtk-udp-client
         ```
 
 *   **Sử dụng Podman (sử dụng thêm nhãn `:Z` để gán nhãn SELinux phù hợp):**
@@ -312,8 +321,8 @@ Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume
         ```bash
         podman run --rm -it \
           -v $(pwd):/data:ro,Z \
-          rtk-udp-server \
-          /app/client_cli /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+          rtk-udp-client \
+          /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
         ```
     *   **Truyền đầy đủ cấu hình qua biến môi trường (ENV):**
         ```bash
@@ -325,8 +334,7 @@ Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume
           -e HTTP_PORT=8080 \
           -e BLOCK_SIZE=16384 \
           -e LOG_PROGRESS=true \
-          rtk-udp-server \
-          /app/client_cli
+          rtk-udp-client
         ```
 
 ---

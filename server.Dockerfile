@@ -4,8 +4,8 @@ FROM rust:1.75 AS builder
 WORKDIR /usr/src/app
 COPY . .
 
-# Build the server and client binaries in release mode
-RUN cargo build --release --bin server --bin client_cli
+# Build the server binary in release mode
+RUN cargo build --release --bin server
 
 # Stage 2: Create a minimal runner image
 FROM debian:bookworm-slim
@@ -15,9 +15,8 @@ RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/
 
 WORKDIR /app
 
-# Copy the compiled binaries from the builder stage
+# Copy the compiled binary from the builder stage
 COPY --from=builder /usr/src/app/target/release/server /app/server
-COPY --from=builder /usr/src/app/target/release/client_cli /app/client_cli
 
 # Expose ports (UDP for transfer, TCP for Dashboard)
 EXPOSE 5000/udp
