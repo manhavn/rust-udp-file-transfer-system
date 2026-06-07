@@ -155,7 +155,8 @@ build_client() {
 cleanup_all() {
     echo -e "\n${YELLOW}→ Đang dọn dẹp toàn bộ các images khỏi Docker/Podman Engine để tiết kiệm dung lượng...${NC}"
     $ENGINE rmi rtk.udp/server rtk.udp/client rtk.app/dep-cache:latest rtk.builder/base:latest rtk.runtime/base:latest >/dev/null 2>&1
-    echo -e "${GREEN}✔ Đã xóa toàn bộ images trong container registry. Các sản phẩm đã được lưu trữ an toàn trong các file .tar!${NC}"
+    $ENGINE image prune -f >/dev/null 2>&1
+    echo -e "${GREEN}✔ Đã xóa toàn bộ images trong container registry và prune các layers dư thừa. Các sản phẩm đã được lưu trữ an toàn trong các file .tar!${NC}"
 }
 
 # Hiển thị Menu lựa chọn build thành phẩm
