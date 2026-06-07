@@ -33,11 +33,26 @@ Hệ thống truyền tải file tốc độ cao và đáng tin cậy qua giao t
 
 ## 3. Hướng Dẫn Biên Dịch Toàn Bộ Workspace
 
+### 3.1. Biên dịch mặc định (Native)
 Trước tiên, hãy chắc chắn bạn đã cài đặt Rust và Cargo trên hệ thống. Sau đó, chạy lệnh sau ở thư mục gốc của dự án:
 ```bash
 cargo build --release
 ```
 Các tệp nhị phân đầu ra sẽ nằm tại thư mục `target/release/`.
+
+### 3.2. Biên dịch đa nền tảng và kiến trúc (Interactive Cross-Platform Build Scripts)
+Để thuận tiện cho việc biên dịch và đóng gói lên các hệ điều hành và kiến trúc phần cứng khác nhau (Linux x86_64/aarch64, Windows x86_64, macOS x86_64/aarch64), bạn có thể sử dụng 2 kịch bản build tương tác ở thư mục gốc:
+
+*   **Biên dịch Server:**
+    ```bash
+    ./build_server.sh
+    ```
+*   **Biên dịch Client CLI:**
+    ```bash
+    ./build_client.sh
+    ```
+
+Khi chạy, kịch bản sẽ hiển thị một menu để bạn lựa chọn môi trường đích mong muốn, tự động thêm target tương ứng thông qua `rustup` và tiến hành biên dịch ra file thực thi ở chế độ tối ưu (`--release`).
 
 ---
 
