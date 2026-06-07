@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.work.OneTimeWorkRequestBuilder
@@ -140,16 +141,19 @@ fun UdpUploadScreen(
     onStartWorkManager: (String, String, Int, Int, Int, String?, (String) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
+    val sharedPreferences = remember {
+        context.getSharedPreferences("udp_transfer_prefs", Context.MODE_PRIVATE)
+    }
     
     // States
     var filePath by remember { mutableStateOf("") }
     var fileName by remember { mutableStateOf("demo_data.bin") }
     var demoContent by remember { mutableStateOf("Nội dung thử nghiệm của file demo truyền tải UDP.") }
-    var serverIp by remember { mutableStateOf("") }
-    var udpPortStr by remember { mutableStateOf("5000") }
-    var httpPortStr by remember { mutableStateOf("8080") }
-    var blockSizeStr by remember { mutableStateOf("16384") }
-    var password by remember { mutableStateOf("") }
+    var serverIp by remember { mutableStateOf(sharedPreferences.getString("server_ip", "") ?: "") }
+    var udpPortStr by remember { mutableStateOf(sharedPreferences.getString("udp_port", "5000") ?: "5000") }
+    var httpPortStr by remember { mutableStateOf(sharedPreferences.getString("http_port", "8080") ?: "8080") }
+    var blockSizeStr by remember { mutableStateOf(sharedPreferences.getString("block_size", "16384") ?: "16384") }
+    var password by remember { mutableStateOf(sharedPreferences.getString("password", "") ?: "") }
     var statusText by remember { mutableStateOf("Chọn một file hoặc tạo file demo để bắt đầu.") }
 
     val scrollState = rememberScrollState()
@@ -299,9 +303,14 @@ fun UdpUploadScreen(
             color = MaterialTheme.colorScheme.secondary
         )
 
+        var isPasswordVisible by remember { mutableStateOf(false) }
+
         OutlinedTextField(
             value = serverIp,
-            onValueChange = { serverIp = it },
+            onValueChange = { 
+                serverIp = it 
+                sharedPreferences.edit().putString("server_ip", it).apply()
+            },
             label = { Text("Địa chỉ IP Server") },
             placeholder = { Text("Ví dụ: 10.0.2.2 hoặc 192.168.1.100", color = Color.Gray) },
             modifier = Modifier.fillMaxWidth(),
@@ -317,7 +326,10 @@ fun UdpUploadScreen(
         ) {
             OutlinedTextField(
                 value = udpPortStr,
-                onValueChange = { udpPortStr = it },
+                onValueChange = { 
+                    udpPortStr = it 
+                    sharedPreferences.edit().putString("udp_port", it).apply()
+                },
                 label = { Text("Cổng UDP") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f),
@@ -329,7 +341,10 @@ fun UdpUploadScreen(
 
             OutlinedTextField(
                 value = httpPortStr,
-                onValueChange = { httpPortStr = it },
+                onValueChange = { 
+                    httpPortStr = it 
+                    sharedPreferences.edit().putString("http_port", it).apply()
+                },
                 label = { Text("Cổng HTTP") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f),
@@ -346,7 +361,10 @@ fun UdpUploadScreen(
         ) {
             OutlinedTextField(
                 value = blockSizeStr,
-                onValueChange = { blockSizeStr = it },
+                onValueChange = { 
+                    blockSizeStr = it 
+                    sharedPreferences.edit().putString("block_size", it).apply()
+                },
                 label = { Text("Kích thước Block (bytes)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1.5f),
@@ -358,9 +376,22 @@ fun UdpUploadScreen(
 
             OutlinedTextField(
                 value = password,
-                onValueChange = { password = it },
+                onValueChange = { 
+                    password = it 
+                    sharedPreferences.edit().putString("password", it).apply()
+                },
                 label = { Text("Mật khẩu (Tùy chọn)") },
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    TextButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                        Text(
+                            text = if (isPasswordVisible) "Ẩn" else "Hiện",
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                },
                 modifier = Modifier.weight(1.5f),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.secondary,

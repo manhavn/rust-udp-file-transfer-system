@@ -21,6 +21,8 @@ android {
             storePassword "my-password"
             keyAlias "my-key-alias"
             keyPassword "my-password"
+            v1SigningEnabled true
+            v2SigningEnabled true
         }
     }
 
