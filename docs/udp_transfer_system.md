@@ -242,4 +242,34 @@ Nếu bạn không muốn sử dụng thư viện bên thứ ba như JNA, bạn 
             blockSize: Int
         ): Int
     }
-    ```
+}
+
+---
+
+## 5. Cơ Chế Lưu Trữ Vật Lý, Resume & Dọn Dẹp Mới Nhất
+
+Hệ thống đã triển khai các nâng cấp quan trọng để tăng cường hiệu năng, độ tin cậy và tối ưu hóa tài nguyên:
+
+### 5.1. Lưu trữ Vật lý qua Hash ID (Chống Ghi Đè)
+*   **Trên đĩa cứng (Disk):** Tất cả các tệp tải lên được lưu dưới dạng `{packet_code}.bin` (ví dụ: `uploads/253711611401622785154161224.bin`), trong đó `packet_code` là mã băm SHA-256 duy nhất của tệp. Điều này triệt tiêu hoàn toàn rủi ro ghi đè khi nhiều người dùng tải lên các tệp khác nhau nhưng trùng tên gốc.
+*   **Trong Database (SQLite):** Lưu giữ tên tệp gốc ban đầu (ví dụ: `original_name.bin`) để hiển thị lên giao diện UI Dashboard.
+
+### 5.2. Hỗ trợ Resume khi đổi tên tệp
+*   Khi quá trình tải lên bị gián đoạn và người dùng đổi tên tệp ở client rồi bấm gửi tiếp:
+    1.  Client tính toán mã băm SHA-256 của tệp mới (mã băm không đổi vì nội dung không đổi) và gửi yêu cầu đăng ký lên Server.
+    2.  Server phát hiện mã băm đã tồn tại trong database, tự động cập nhật tên tệp mới (`file_name`) vào cơ sở dữ liệu.
+    3.  Server tiếp tục ghi dữ liệu UDP nối tiếp vào cùng tệp tin `{packet_code}.bin` trước đó trên ổ đĩa từ vị trí resume.
+
+### 5.3. Tải về với Tên Tệp Gốc (Dynamic Download Router)
+*   Đường dẫn tải file chuyển sang dạng động `/uploads/:packet_code` do Axum điều phối.
+*   Khi người dùng tải xuống từ UI, server sẽ mở file `{packet_code}.bin` trên disk, đọc tên tệp gốc tương ứng từ database, rồi trả về header:
+    `Content-Disposition: attachment; filename="original_name.bin"`
+    Giúp trình duyệt tự động lưu tệp bằng tên gốc ban đầu.
+
+### 5.4. Chống lỗi Khóa Database (SQLite Lock Prevention)
+*   Do tiến trình nhận gói tin UDP progress cập nhật trạng thái liên tục xuống SQLite, SQLite mặc định có thể trả về lỗi `database is locked`.
+*   Server đã thiết lập cơ chế `busy_timeout` 5 giây trên mọi kết nối SQLite. SQLite sẽ tự động đợi khóa được nhả ra trong tối đa 5 giây thay vì báo lỗi ngay lập tức.
+
+### 5.5. Tối ưu hóa Dashboard Tiết Kiệm Tài Nguyên
+*   **Hiển thị thời gian:** Loại bỏ hiển thị phần giây ở tất cả các trường thời gian và mốc tự hủy (đếm ngược chỉ hiển thị ở mức độ phút, ví dụ: `Tự hủy: 10:20 (còn 2 phút)`).
+*   **Cập nhật dữ liệu:** Loại bỏ cơ chế cập nhật tự động bằng vòng lặp `setInterval`. Dashboard chỉ truy vấn API một lần duy nhất lúc tải trang. Việc cập nhật danh sách hoàn toàn phụ thuộc vào việc tải lại trang thủ công hoặc bấm F5 của người dùng, giúp giảm tối đa tải CPU/RAM cho cả client và server.
