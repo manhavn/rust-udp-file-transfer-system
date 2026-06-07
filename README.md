@@ -81,18 +81,18 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
 *   `--db-path`: Đường dẫn tệp cơ sở dữ liệu SQLite (mặc định: `./db/data.sqlite`).
 *   `--disable-request-log`: Tắt toàn bộ output log request của HTTP server và các log tiến trình/lỗi của UDP server (mặc định server sẽ bật log).
 
-**Ví dụ chạy Server (Quét dọn dẹp mỗi 3 phút, lưu tệp dở dang tối đa 30 phút, lưu tệp hoàn thành tối đa 20 phút):**
+**Ví dụ chạy Server với cấu hình đầy đủ tất cả tham số:**
 *   **Linux:**
     ```bash
-    ./scripts/run_server_linux.sh --cleanup-interval 3 --incomplete-timeout 30 --completed-timeout 20
+    ./scripts/run_server_linux.sh --udp-port 5000 --http-port 8080 --upload-dir ./uploads --db-path ./db/data.sqlite --cleanup-interval 3 --incomplete-timeout 30 --completed-timeout 20 --disable-request-log
     ```
 *   **macOS:**
     ```bash
-    ./scripts/run_server_macos.sh --cleanup-interval 3 --incomplete-timeout 30 --completed-timeout 20
+    ./scripts/run_server_macos.sh --udp-port 5000 --http-port 8080 --upload-dir ./uploads --db-path ./db/data.sqlite --cleanup-interval 3 --incomplete-timeout 30 --completed-timeout 20 --disable-request-log
     ```
 *   **Windows:**
     ```batch
-    scripts\run_server_windows.bat --cleanup-interval 3 --incomplete-timeout 30 --completed-timeout 20
+    scripts\run_server_windows.bat --udp-port 5000 --http-port 8080 --upload-dir .\uploads --db-path .\db\data.sqlite --cleanup-interval 3 --incomplete-timeout 30 --completed-timeout 20 --disable-request-log
     ```
 
 ---
@@ -126,6 +126,16 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
 *   `--block-size` / `-b`: Kích thước mỗi khối dữ liệu UDP gửi đi tính bằng bytes (mặc định: `16384` bytes).
 *   `--log-progress`: Hiển thị tiến trình upload dưới dạng log dòng mới (mặc định: tắt, hiển thị bằng `\r`).
 
+#### Ví dụ gửi tệp tin với cấu hình đầy đủ tất cả tham số (Khởi chạy trực tiếp file thực thi):
+*   **Linux/macOS:**
+    ```bash
+    ./target/release/client_cli video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+    ```
+*   **Windows (Command Prompt):**
+    ```cmd
+    target\release\client_cli.exe video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+    ```
+
 ---
 
 ### 4.3. Chạy ở môi trường Production (Production Run Scripts)
@@ -135,23 +145,29 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
     *   **Linux/macOS:**
         ```bash
         ./run_server.sh [các tham số cấu hình...]
-        # Ví dụ:
-        ./run_server.sh --cleanup-interval 5 --completed-timeout 25
+        # Ví dụ với đầy đủ tham số:
+        ./run_server.sh --udp-port 5000 --http-port 8080 --upload-dir ./uploads --db-path ./db/data.sqlite --cleanup-interval 5 --incomplete-timeout 60 --completed-timeout 15 --disable-request-log
         ```
     *   **Windows:**
         ```batch
         run_server.bat [các tham số cấu hình...]
+        # Ví dụ với đầy đủ tham số:
+        run_server.bat --udp-port 5000 --http-port 8080 --upload-dir .\uploads --db-path .\db\data.sqlite --cleanup-interval 5 --incomplete-timeout 60 --completed-timeout 15 --disable-request-log
         ```
 *   **Khởi chạy Client CLI (Gửi file):**
     *   **Linux/macOS:**
         ```bash
-        ./run_client.sh <đường_dẫn_file> [ip_server] [cổng_udp] [cổng_http]
-        # Ví dụ:
+        # Ví dụ chạy nhanh sử dụng script (các tham số cấu hình vị trí):
         ./run_client.sh video.mp4 127.0.0.1 5000 8080
+        # Ví dụ chạy trực tiếp file thực thi với đầy đủ tất cả tham số:
+        ./target/release/client_cli video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
         ```
     *   **Windows:**
         ```batch
-        run_client.bat <đường_dẫn_file> [ip_server] [cổng_udp] [cổng_http]
+        # Ví dụ chạy nhanh sử dụng script (các tham số cấu hình vị trí):
+        run_client.bat video.mp4 127.0.0.1 5000 8080
+        # Ví dụ chạy trực tiếp file thực thi với đầy đủ tất cả tham số:
+        target\release\client_cli.exe video.mp4 --server-ip 127.0.0.1 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
         ```
 
 Các kịch bản này tự động phát hiện đường dẫn tệp thực thi release (trong thư mục `target/release/` hoặc cùng thư mục hiện tại nếu tệp chạy được sao chép độc lập), tự động tạo các thư mục cần thiết (`uploads/` và `db/`), rồi khởi chạy chương trình với đầy đủ tham số.
@@ -227,7 +243,7 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
         ```
         *(Lưu ý đối với Podman trên các hệ thống Linux bật SELinux, hậu tố `:Z` là bắt buộc để phân quyền volume).*
 
-*   **Chạy tùy chỉnh cổng và bật logs request (Thay đổi ENV):**
+*   **Chạy với cấu hình đầy đủ tất cả các biến môi trường (Full Environment Variables):**
     *   **Docker:**
         ```bash
         docker run -d \
@@ -236,6 +252,11 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
           -p 8085:8085/tcp \
           -e UDP_PORT=5005 \
           -e HTTP_PORT=8085 \
+          -e UPLOAD_DIR=/app/uploads \
+          -e DB_PATH=/app/db/data.sqlite \
+          -e CLEANUP_INTERVAL=5 \
+          -e INCOMPLETE_TIMEOUT=60 \
+          -e COMPLETED_TIMEOUT=15 \
           -e DISABLE_REQUEST_LOG=false \
           -v $(pwd)/uploads:/app/uploads \
           -v $(pwd)/db:/app/db \
@@ -249,10 +270,63 @@ Khi chạy container, bạn có thể truyền các biến môi trường để 
           -p 8085:8085/tcp \
           -e UDP_PORT=5005 \
           -e HTTP_PORT=8085 \
+          -e UPLOAD_DIR=/app/uploads \
+          -e DB_PATH=/app/db/data.sqlite \
+          -e CLEANUP_INTERVAL=5 \
+          -e INCOMPLETE_TIMEOUT=60 \
+          -e COMPLETED_TIMEOUT=15 \
           -e DISABLE_REQUEST_LOG=false \
           -v $(pwd)/uploads:/app/uploads:Z \
           -v $(pwd)/db:/app/db:Z \
           rtk-udp-server
+        ```
+        *(Lưu ý đối với Podman trên các hệ thống Linux bật SELinux, hậu tố `:Z` là bắt buộc để phân quyền volume).*
+
+#### 3. Khởi chạy Client (Gửi file qua Container):
+Vì tệp tin cần gửi nằm trên máy Host, bạn cần gắn kết (Volume Mount) tệp tin hoặc thư mục chứa tệp tin vào trong Container. Nên sử dụng chế độ chỉ đọc (`:ro`) để bảo vệ dữ liệu gốc trên máy host.
+
+*   **Sử dụng Docker:**
+    *   **Truyền đầy đủ tham số qua dòng lệnh (CLI):**
+        ```bash
+        docker run --rm -it \
+          -v $(pwd):/data:ro \
+          rtk-udp-server \
+          /app/client_cli /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+        ```
+    *   **Truyền đầy đủ cấu hình qua biến môi trường (ENV):**
+        ```bash
+        docker run --rm -it \
+          -v $(pwd):/data:ro \
+          -e FILE_PATH=/data/video.mp4 \
+          -e SERVER_IP=192.168.1.100 \
+          -e UDP_PORT=5000 \
+          -e HTTP_PORT=8080 \
+          -e BLOCK_SIZE=16384 \
+          -e LOG_PROGRESS=true \
+          rtk-udp-server \
+          /app/client_cli
+        ```
+
+*   **Sử dụng Podman (sử dụng thêm nhãn `:Z` để gán nhãn SELinux phù hợp):**
+    *   **Truyền đầy đủ tham số qua dòng lệnh (CLI):**
+        ```bash
+        podman run --rm -it \
+          -v $(pwd):/data:ro,Z \
+          rtk-udp-server \
+          /app/client_cli /data/video.mp4 --server-ip 192.168.1.100 --udp-port 5000 --http-port 8080 --block-size 16384 --log-progress
+        ```
+    *   **Truyền đầy đủ cấu hình qua biến môi trường (ENV):**
+        ```bash
+        podman run --rm -it \
+          -v $(pwd):/data:ro,Z \
+          -e FILE_PATH=/data/video.mp4 \
+          -e SERVER_IP=192.168.1.100 \
+          -e UDP_PORT=5000 \
+          -e HTTP_PORT=8080 \
+          -e BLOCK_SIZE=16384 \
+          -e LOG_PROGRESS=true \
+          rtk-udp-server \
+          /app/client_cli
         ```
 
 ---
