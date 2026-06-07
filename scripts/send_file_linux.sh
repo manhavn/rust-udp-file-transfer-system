@@ -24,4 +24,4 @@ else
 fi
 
 echo "==> Đang bắt đầu gửi file qua Linux client..."
-$BINARY "$FILE" --server-ip "$IP" --udp-port "$UDP_PORT" --http-port "$HTTP_PORT"
+$BINARY "$FILE" --server-ip "$IP" --udp-port "$UDP_PORT" --http-port "$HTTP_PORT" --log-progress

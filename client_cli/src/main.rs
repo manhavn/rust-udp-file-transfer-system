@@ -29,6 +29,10 @@ struct Args {
     /// Kích thước mỗi khối dữ liệu UDP gửi đi (bytes)
     #[arg(short, long, default_value_t = 16384)]
     block_size: usize,
+
+    /// Hiển thị tiến trình upload dạng log dòng mới
+    #[arg(long, default_value_t = false)]
+    log_progress: bool,
 }
 
 async fn send_chunk_with_retry(
@@ -196,14 +200,22 @@ async fn main() -> Result<(), String> {
             break;
         }
 
-        let percent = (seek_begin + bytes_read as u64) as f64 / file_size as f64 * 100.0;
-        print!(
-            "\r   -> Đang tải lên: {}/{} bytes ({:.2}%)",
-            seek_begin + bytes_read as u64,
-            file_size,
-            percent
-        );
-        std::io::Write::flush(&mut std::io::stdout()).unwrap();
+        if args.log_progress {
+            println!(
+                "   -> Đang tải lên: {} / {}",
+                seek_begin,
+                file_size
+            );
+        } else {
+            let percent = (seek_begin + bytes_read as u64) as f64 / file_size as f64 * 100.0;
+            print!(
+                "\r   -> Đang tải lên: {}/{} bytes ({:.2}%)",
+                seek_begin + bytes_read as u64,
+                file_size,
+                percent
+            );
+            std::io::Write::flush(&mut std::io::stdout()).unwrap();
+        }
 
         send_chunk_with_retry(
             &udp_socket,
@@ -217,7 +229,15 @@ async fn main() -> Result<(), String> {
 
         seek_begin += bytes_read as u64;
     }
-    println!();
+    if args.log_progress {
+        println!(
+            "   -> Đang tải lên: {} / {}",
+            file_size,
+            file_size
+        );
+    } else {
+        println!();
+    }
 
     // 4. Send end packet
     println!("4. Gửi tín hiệu hoàn thành (Trạng thái kết thúc)...");

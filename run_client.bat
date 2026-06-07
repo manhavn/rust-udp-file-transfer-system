@@ -39,4 +39,4 @@ echo Địa chỉ Server: %SERVER_IP%
 echo Cổng UDP: %UDP_PORT% ^| Cổng HTTP: %HTTP_PORT%
 echo ==========================================================
 
-%BINARY% "%FILE_PATH%" --server-ip "%SERVER_IP%" --udp-port "%UDP_PORT%" --http-port "%HTTP_PORT%"
+%BINARY% "%FILE_PATH%" --server-ip "%SERVER_IP%" --udp-port "%UDP_PORT%" --http-port "%HTTP_PORT%" --log-progress
