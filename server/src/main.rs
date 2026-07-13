@@ -530,6 +530,37 @@ const INDEX_HTML: &str = r#"
             border: 1px solid var(--border);
         }
 
+        .copy-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border);
+            color: var(--text-light);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: scale(1.03);
+            border-color: var(--text-muted);
+        }
+
+        .copy-btn.disabled {
+            background: rgba(255,255,255,0.02);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            pointer-events: none;
+            border: 1px solid var(--border);
+            opacity: 0.5;
+        }
+
         .empty-state {
             text-align: center;
             padding: 3rem 1rem;
@@ -940,6 +971,8 @@ const INDEX_HTML: &str = r#"
                 const statusClass = isCompleted ? 'badge-completed' : 'badge-receiving';
                 const downloadOnClick = isCompleted ? `onclick="handleDownload('${upload.packet_code}', ${upload.has_password})"` : '';
                 const downloadClass = isCompleted ? 'download-btn' : 'download-btn disabled';
+                const copyOnClick = isCompleted ? `onclick="handleCopyLink(this, '${upload.packet_code}', ${upload.has_password})"` : '';
+                const copyClass = isCompleted ? 'copy-btn' : 'copy-btn disabled';
                 const lockIcon = upload.has_password ? '<span style="color: var(--warning); margin-left: 4px;" title="File được bảo vệ bằng mật khẩu">🔒</span>' : '';
 
                 html += `
@@ -973,9 +1006,14 @@ const INDEX_HTML: &str = r#"
                              </div>
                          </td>
                         <td>
-                            <button ${downloadOnClick} class="${downloadClass}" style="border: none;">
-                                📥 Tải về
-                            </button>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <button ${downloadOnClick} class="${downloadClass}" style="border: none;">
+                                    📥 Tải về
+                                </button>
+                                <button ${copyOnClick} class="${copyClass}" style="border: none;">
+                                    🔗 Copy Link
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -1072,6 +1110,69 @@ const INDEX_HTML: &str = r#"
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+        }
+
+        async function handleCopyLink(btn, packetCode, hasPassword) {
+            let url = `${window.location.origin}/uploads/${encodeURIComponent(packetCode)}`;
+            if (hasPassword) {
+                const password = prompt("File này được bảo vệ bằng mật khẩu. Vui lòng nhập mật khẩu để nhúng vào link tải (hoặc để trống nếu muốn người dùng tự nhập mật khẩu khi tải):");
+                if (password === null) return; // Hủy bỏ
+                if (password.trim() !== '') {
+                    try {
+                        const response = await fetch('/api/verify_password', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ packet_code: packetCode, password: password }),
+                        });
+                        const resData = await response.json();
+                        if (!resData.success) {
+                            alert("Lỗi: " + (resData.error || "Mật khẩu không chính xác"));
+                            return;
+                        }
+                        url += `?password=${encodeURIComponent(password)}`;
+                    } catch (err) {
+                        console.error("Lỗi xác thực mật khẩu:", err);
+                        alert("Có lỗi xảy ra khi xác thực mật khẩu.");
+                        return;
+                    }
+                }
+            }
+
+            try {
+                await navigator.clipboard.writeText(url);
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '✔ Copied!';
+                btn.style.borderColor = 'var(--success)';
+                btn.style.color = 'var(--success)';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.style.borderColor = '';
+                    btn.style.color = '';
+                }, 2000);
+            } catch (err) {
+                console.error("Không thể copy vào clipboard:", err);
+                const tempInput = document.createElement('input');
+                tempInput.value = url;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                try {
+                    document.execCommand('copy');
+                    const originalText = btn.innerHTML;
+                    btn.innerHTML = '✔ Copied!';
+                    btn.style.borderColor = 'var(--success)';
+                    btn.style.color = 'var(--success)';
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.style.borderColor = '';
+                        btn.style.color = '';
+                    }, 2000);
+                } catch (e) {
+                    alert("Không thể tự động copy, link tải của bạn là:\n" + url);
+                }
+                document.body.removeChild(tempInput);
+            }
         }
 
         // Load data once on page load (manual refresh/F5 will reload)
