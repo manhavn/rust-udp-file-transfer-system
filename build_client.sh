@@ -63,18 +63,25 @@ if [ -n "$TARGET" ]; then
     fi
 fi
 
+# Chọn công cụ build (cargo build hoặc cargo zigbuild cho cross-compile nếu có)
+BUILD_CMD="cargo build"
+if [ -n "$TARGET" ] && command -v cargo-zigbuild >/dev/null 2>&1; then
+    BUILD_CMD="cargo zigbuild"
+    echo -e "${YELLOW}Phát hiện cargo-zigbuild: Sử dụng '$BUILD_CMD' để tối ưu biên dịch chéo.${NC}"
+fi
+
 echo -e "${BLUE}[2/2] Đang biên dịch client_cli ở chế độ Release...${NC}"
 if [ -z "$TARGET" ]; then
-    cargo build --release --bin client_cli
+    $BUILD_CMD --release --bin client_cli
     BUILD_STATUS=$?
     OUT_DIR="target/release"
     BINARY_NAME="client_cli"
 else
     if [[ "$TARGET" == *"windows-gnu"* ]]; then
         # Statically link MinGW runtime DLLs (libgcc, libwinpthread, etc.) for Windows
-        RUSTFLAGS="-C link-args=-static" cargo build --release --target $TARGET --bin client_cli
+        RUSTFLAGS="-C link-args=-static" $BUILD_CMD --release --target $TARGET --bin client_cli
     else
-        cargo build --release --target $TARGET --bin client_cli
+        $BUILD_CMD --release --target $TARGET --bin client_cli
     fi
     BUILD_STATUS=$?
     OUT_DIR="target/$TARGET/release"
@@ -98,7 +105,11 @@ else
     elif [[ "$TARGET" == *"darwin"* ]]; then
         echo -e "${YELLOW}Lưu ý: Biên dịch chéo sang macOS từ hệ điều hành khác cần có SDK macOS và công cụ osxcross.${NC}"
     elif [[ "$TARGET" == *"musl"* ]]; then
-        echo -e "${YELLOW}Lưu ý: Để build tĩnh (musl) trên Linux, bạn cần cài đặt musl-tools và gcc-multilib: sudo apt install musl-tools musl-dev${NC}"
+        if [[ "$(uname)" == "Darwin" ]]; then
+            echo -e "${YELLOW}Lưu ý: Để biên dịch chéo tĩnh (musl) trên macOS, khuyên dùng cargo-zigbuild: brew install cargo-zigbuild${NC}"
+        else
+            echo -e "${YELLOW}Lưu ý: Để build tĩnh (musl) trên Linux, bạn cần cài đặt musl-tools và gcc-multilib: sudo apt install musl-tools musl-dev${NC}"
+        fi
     fi
     exit 1
 fi
