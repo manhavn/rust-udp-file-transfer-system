@@ -1,18 +1,18 @@
+use axum::{
+    extract::{Path, State},
+    response::{Html, IntoResponse},
+    routing::{get, post},
+    Json, Router,
+};
+use chrono::{DateTime, Utc};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
-use axum::{
-    routing::{get, post},
-    extract::{State, Path},
-    response::{Html, IntoResponse},
-    Json, Router,
-};
 use tower_http::cors::CorsLayer;
-use serde_json::json;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UploadInfo {
@@ -1213,15 +1213,18 @@ impl<S> Drop for DownloadStream<S> {
             } else {
                 0
             };
-            
+
             let disable_log = lock.disable_request_log;
             if !disable_log {
-                println!("[HTTP] Download completed or disconnected for {}. Active downloads: {}", packet_code, current_count);
+                println!(
+                    "[HTTP] Download completed or disconnected for {}. Active downloads: {}",
+                    packet_code, current_count
+                );
             }
-            
+
             if current_count == 0 {
                 lock.active_downloads.remove(&packet_code);
-                
+
                 let mut should_delete = false;
                 let mut file_name = String::new();
                 let mut is_completed = false;
@@ -1239,7 +1242,7 @@ impl<S> Drop for DownloadStream<S> {
                     let file_name_disk = format!("{}.bin", packet_code);
                     let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
                     let _ = std::fs::remove_file(&file_path);
-                    
+
                     let db_path = lock.db_path.clone();
                     let code_clone = packet_code.clone();
                     let _ = tokio::task::spawn_blocking(move || {
@@ -1250,9 +1253,14 @@ impl<S> Drop for DownloadStream<S> {
                                 rusqlite::params![code_clone],
                             );
                         }
-                    }).await;
+                    })
+                    .await;
                     if !disable_log {
-                        let type_str = if is_completed { "completed" } else { "incomplete" };
+                        let type_str = if is_completed {
+                            "completed"
+                        } else {
+                            "incomplete"
+                        };
                         println!(
                             "[HTTP Drop Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
                             type_str, packet_code, file_name
@@ -1282,7 +1290,8 @@ async fn download_file(
                 return (
                     axum::http::StatusCode::BAD_REQUEST,
                     "File chưa hoàn thành tải lên",
-                ).into_response();
+                )
+                    .into_response();
             }
 
             // Check download password if configured
@@ -1293,7 +1302,8 @@ async fn download_file(
                         return (
                             axum::http::StatusCode::UNAUTHORIZED,
                             "Mật khẩu tải xuống không chính xác",
-                        ).into_response();
+                        )
+                            .into_response();
                     }
                 }
             }
@@ -1304,14 +1314,16 @@ async fn download_file(
                 return (
                     axum::http::StatusCode::NOT_FOUND,
                     "File vật lý không tồn tại trên server",
-                ).into_response();
+                )
+                    .into_response();
             }
             (upload.file_name.clone(), file_path)
         } else {
             return (
                 axum::http::StatusCode::NOT_FOUND,
                 "Mã gói tin không tồn tại",
-            ).into_response();
+            )
+                .into_response();
         }
     };
 
@@ -1319,11 +1331,17 @@ async fn download_file(
     {
         let mut lock = state.write().await;
         let disable_log = lock.disable_request_log;
-        let count = lock.active_downloads.entry(packet_code.clone()).or_insert(0);
+        let count = lock
+            .active_downloads
+            .entry(packet_code.clone())
+            .or_insert(0);
         *count += 1;
         let current_count = *count;
         if !disable_log {
-            println!("[HTTP] Starting download for {}. Active downloads: {}", packet_code, current_count);
+            println!(
+                "[HTTP] Starting download for {}. Active downloads: {}",
+                packet_code, current_count
+            );
         }
     }
 
@@ -1364,7 +1382,8 @@ async fn download_file(
             (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Không thể mở file",
-            ).into_response()
+            )
+                .into_response()
         }
     }
 }
@@ -1386,7 +1405,7 @@ async fn list_uploads(
 ) -> Json<serde_json::Value> {
     let lock = state.read().await;
     let mut list: Vec<UploadInfo> = lock.uploads.values().cloned().collect();
-    
+
     // Sort by started_at descending
     list.sort_by(|a, b| b.started_at.cmp(&a.started_at));
 
@@ -1417,7 +1436,7 @@ async fn list_uploads(
     // Paginate
     let page = query.page.unwrap_or(1);
     let limit = query.limit.unwrap_or(10);
-    
+
     let start_idx = if page > 0 { (page - 1) * limit } else { 0 };
     let paginated_items = if start_idx < filtered_list.len() {
         let end_idx = std::cmp::min(start_idx + limit, filtered_list.len());
@@ -1444,26 +1463,33 @@ async fn register_upload(
     let mut lock = state.write().await;
     let file_name_disk = format!("{}.bin", payload.packet_code);
     let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
-    
+
     // Check if the upload already exists and determine the safe resume offset
-    let (bytes_received, status, delete_at, extended_delete_at) = if let Some(existing) = lock.uploads.get(&payload.packet_code) {
-        let disk_size = if file_path.exists() {
-            file_path.metadata().map(|m| m.len()).unwrap_or(0)
+    let (bytes_received, status, delete_at, extended_delete_at) =
+        if let Some(existing) = lock.uploads.get(&payload.packet_code) {
+            let disk_size = if file_path.exists() {
+                file_path.metadata().map(|m| m.len()).unwrap_or(0)
+            } else {
+                0
+            };
+            // The resume point is the minimum of what we recorded and what is actually on disk
+            let resume_offset = existing.bytes_received.min(disk_size);
+            let new_delete_at = if existing.status == "Hoàn thành" {
+                Some(Utc::now() + chrono::Duration::minutes(lock.completed_timeout_mins))
+            } else {
+                Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins))
+            };
+            (
+                resume_offset,
+                existing.status.clone(),
+                new_delete_at,
+                existing.extended_delete_at,
+            )
         } else {
-            0
+            let new_delete_at =
+                Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins));
+            (0, "Đang nhận".to_string(), new_delete_at, None)
         };
-        // The resume point is the minimum of what we recorded and what is actually on disk
-        let resume_offset = existing.bytes_received.min(disk_size);
-        let new_delete_at = if existing.status == "Hoàn thành" {
-            Some(Utc::now() + chrono::Duration::minutes(lock.completed_timeout_mins))
-        } else {
-            Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins))
-        };
-        (resume_offset, existing.status.clone(), new_delete_at, existing.extended_delete_at)
-    } else {
-        let new_delete_at = Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins));
-        (0, "Đang nhận".to_string(), new_delete_at, None)
-    };
 
     // Use payload password or retain existing password if it was set
     let password = payload.password.clone().or_else(|| {
@@ -1483,13 +1509,18 @@ async fn register_upload(
         bytes_received,
         status: status.clone(),
         started_at,
-        completed_at: if status == "Hoàn thành" { Some(started_at) } else { None },
+        completed_at: if status == "Hoàn thành" {
+            Some(started_at)
+        } else {
+            None
+        },
         delete_at,
         extended_delete_at,
         has_password,
         password,
     };
-    lock.uploads.insert(payload.packet_code.clone(), info.clone());
+    lock.uploads
+        .insert(payload.packet_code.clone(), info.clone());
 
     // Save to SQLite
     let db_path = lock.db_path.clone();
@@ -1519,10 +1550,12 @@ async fn register_upload(
             }
         }
     }
-    
+
     if !lock.disable_request_log {
-        println!("[HTTP] Registered upload. File: {}, Size: {}, Hash ID: {}, Resume Offset: {}", 
-                 payload.file_name, payload.file_size, payload.packet_code, bytes_received);
+        println!(
+            "[HTTP] Registered upload. File: {}, Size: {}, Hash ID: {}, Resume Offset: {}",
+            payload.file_name, payload.file_size, payload.packet_code, bytes_received
+        );
     }
 
     Json(json!({
@@ -1537,7 +1570,10 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
         let lock = state.read().await;
         lock.cleanup_interval
     };
-    println!("File retention cleanup worker started. Scan interval: {} minutes.", interval_mins);
+    println!(
+        "File retention cleanup worker started. Scan interval: {} minutes.",
+        interval_mins
+    );
     loop {
         // Run checks based on the configured cleanup interval
         tokio::time::sleep(tokio::time::Duration::from_secs(interval_mins * 60)).await;
@@ -1562,7 +1598,8 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
                         if active_count > 0 {
                             // If not extended yet, extend it
                             if upload.extended_delete_at.is_none() {
-                                let new_ext = delete_at + chrono::Duration::minutes(completed_timeout);
+                                let new_ext =
+                                    delete_at + chrono::Duration::minutes(completed_timeout);
                                 updates_to_save.push((code.clone(), new_ext));
                                 println!(
                                     "[Cleanup] File {} has active downloads ({}). Delaying deletion. New extended_delete_at: {}",
@@ -1571,12 +1608,20 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
                             } else if let Some(ext_time) = upload.extended_delete_at {
                                 // Already extended, delete if extended time reached
                                 if now >= ext_time {
-                                    to_delete.push((code.clone(), upload.file_name.clone(), upload.status == "Hoàn thành"));
+                                    to_delete.push((
+                                        code.clone(),
+                                        upload.file_name.clone(),
+                                        upload.status == "Hoàn thành",
+                                    ));
                                 }
                             }
                         } else {
                             // No active downloads
-                            to_delete.push((code.clone(), upload.file_name.clone(), upload.status == "Hoàn thành"));
+                            to_delete.push((
+                                code.clone(),
+                                upload.file_name.clone(),
+                                upload.status == "Hoàn thành",
+                            ));
                         }
                     }
                 }
@@ -1621,9 +1666,14 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
                         rusqlite::params![code_clone],
                     );
                 }
-            }).await;
+            })
+            .await;
 
-            let type_str = if is_completed { "completed" } else { "incomplete" };
+            let type_str = if is_completed {
+                "completed"
+            } else {
+                "incomplete"
+            };
             println!(
                 "[Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
                 type_str, code, file_name
@@ -1693,7 +1743,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                         let unique_id = common::bytes_to_unique_id(packet.packet_code);
                         let is_end = packet.status == 0;
 
-                         {
+                        {
                             let mut lock = state.write().await;
                             let incomplete_timeout = lock.incomplete_timeout_mins;
                             let completed_timeout = lock.completed_timeout_mins;
@@ -1701,7 +1751,8 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                             lock.uploads.entry(unique_id.clone()).or_insert_with(|| {
                                 let name = format!("{}.bin", unique_id);
                                 let file_name_disk = format!("{}.bin", unique_id);
-                                let file_path = std::path::Path::new(&upload_dir).join(&file_name_disk);
+                                let file_path =
+                                    std::path::Path::new(&upload_dir).join(&file_name_disk);
                                 if let Some(parent) = file_path.parent() {
                                     let _ = std::fs::create_dir_all(parent);
                                 }
@@ -1730,7 +1781,8 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                         let mut write_success = is_end; // End packet has no data, treated as success
                         if !is_end && !packet.data.is_empty() {
                             let file_name_disk = format!("{}.bin", unique_id);
-                            let file_path = std::path::Path::new(&state.read().await.upload_dir).join(&file_name_disk);
+                            let file_path = std::path::Path::new(&state.read().await.upload_dir)
+                                .join(&file_name_disk);
                             let seek_begin = packet.seek_begin;
                             let data = packet.data.to_vec();
 
@@ -1742,7 +1794,8 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                 file.write_all(&data)?;
                                 file.flush()?;
                                 Ok::<(), std::io::Error>(())
-                            }).await;
+                            })
+                            .await;
 
                             if let Ok(Ok(())) = write_res {
                                 write_success = true;
@@ -1761,9 +1814,14 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     entry.completed_at = Some(Utc::now());
                                     entry.file_size = packet.seek_begin;
                                     entry.bytes_received = packet.seek_begin;
-                                    entry.delete_at = Some(Utc::now() + chrono::Duration::minutes(completed_timeout));
+                                    entry.delete_at = Some(
+                                        Utc::now() + chrono::Duration::minutes(completed_timeout),
+                                    );
                                     if !disable_log {
-                                        println!("[UDP] Completed upload of file: {}", entry.file_name);
+                                        println!(
+                                            "[UDP] Completed upload of file: {}",
+                                            entry.file_name
+                                        );
                                     }
                                 } else {
                                     let end_pos = packet.seek_begin + packet.data.len() as u64;
@@ -1773,7 +1831,9 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     if entry.file_size < entry.bytes_received {
                                         entry.file_size = entry.bytes_received;
                                     }
-                                    entry.delete_at = Some(Utc::now() + chrono::Duration::minutes(incomplete_timeout));
+                                    entry.delete_at = Some(
+                                        Utc::now() + chrono::Duration::minutes(incomplete_timeout),
+                                    );
                                 }
 
                                 // Save to SQLite
@@ -1787,9 +1847,17 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
 
                             // Send back ACK only on success
                             let ack_bytes = if is_end {
-                                common::AckPacket::serialize(packet.packet_code, packet.seek_begin, 0)
+                                common::AckPacket::serialize(
+                                    packet.packet_code,
+                                    packet.seek_begin,
+                                    0,
+                                )
                             } else {
-                                common::AckPacket::serialize(packet.packet_code, packet.seek_begin, packet.data.len() as u64)
+                                common::AckPacket::serialize(
+                                    packet.packet_code,
+                                    packet.seek_begin,
+                                    packet.data.len() as u64,
+                                )
                             };
                             let _ = socket.send_to(&ack_bytes, src).await;
                         }
@@ -1850,16 +1918,16 @@ async fn log_request(
 ) -> impl IntoResponse {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
-    
+
     let disable_log = {
         let lock = state.read().await;
         lock.disable_request_log
     };
-    
+
     if !disable_log {
         println!("[HTTP] Request: {} {}", method, path);
     }
-    
+
     next.run(req).await
 }
 
@@ -1873,7 +1941,9 @@ async fn main() {
 
     // Initialize SQLite database
     let db_path = args.db_path.clone();
-    let db_dir = std::path::Path::new(&db_path).parent().unwrap_or(std::path::Path::new("."));
+    let db_dir = std::path::Path::new(&db_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     let _ = std::fs::create_dir_all(db_dir);
     if let Err(e) = init_db(&db_path) {
         eprintln!("[DB] Failed to initialize SQLite database: {}", e);
@@ -1887,7 +1957,10 @@ async fn main() {
             map
         }
         Err(e) => {
-            eprintln!("[DB] Failed to load uploads from DB: {}. Starting with empty cache.", e);
+            eprintln!(
+                "[DB] Failed to load uploads from DB: {}. Starting with empty cache.",
+                e
+            );
             HashMap::new()
         }
     };
@@ -1923,7 +1996,10 @@ async fn main() {
         .route("/api/list", get(list_uploads))
         .route("/api/verify_password", post(verify_password))
         .route("/uploads/:packet_code", get(download_file))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), log_request))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            log_request,
+        ))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

@@ -1,8 +1,8 @@
 use std::ffi::CStr;
-use std::os::raw::c_char;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::SocketAddr;
+use std::os::raw::c_char;
 use std::path::Path;
 use tokio::net::UdpSocket;
 use tokio::time::{timeout, Duration};
@@ -29,19 +29,17 @@ async fn send_chunk_with_retry(
 
         let mut ack_buf = vec![0u8; 1024];
         match timeout(TIMEOUT_DUR, socket.recv_from(&mut ack_buf)).await {
-            Ok(Ok((len, _src))) => {
-                match common::AckPacket::parse(&ack_buf[..len]) {
-                    Ok(ack) => {
-                        if ack.packet_code == packet_code
-                            && ack.seek_begin == seek_begin
-                            && ack.bytes_received == expected_bytes_received
-                        {
-                            return Ok(());
-                        }
+            Ok(Ok((len, _src))) => match common::AckPacket::parse(&ack_buf[..len]) {
+                Ok(ack) => {
+                    if ack.packet_code == packet_code
+                        && ack.seek_begin == seek_begin
+                        && ack.bytes_received == expected_bytes_received
+                    {
+                        return Ok(());
                     }
-                    Err(_) => {}
                 }
-            }
+                Err(_) => {}
+            },
             Ok(Err(_)) => {}
             Err(_) => {}
         }
@@ -172,7 +170,7 @@ pub extern "C" fn rtk_upload_file_with_password(
 
         let packet_code_bytes = common::generate_packet_code_from_hash(&hash_bytes);
         let packet_code_str = common::bytes_to_unique_id(&packet_code_bytes);
-        
+
         let file_size = match file.metadata() {
             Ok(m) => m.len(),
             Err(_) => return -2,
@@ -212,13 +210,14 @@ pub extern "C" fn rtk_upload_file_with_password(
         }
 
         // UDP Address DNS Resolution
-        let server_udp_addr: SocketAddr = match tokio::net::lookup_host(format!("{}:{}", server_ip_str, udp_port)).await {
-            Ok(mut addrs) => match addrs.next() {
-                Some(addr) => addr,
-                None => return -5,
-            },
-            Err(_) => return -5,
-        };
+        let server_udp_addr: SocketAddr =
+            match tokio::net::lookup_host(format!("{}:{}", server_ip_str, udp_port)).await {
+                Ok(mut addrs) => match addrs.next() {
+                    Some(addr) => addr,
+                    None => return -5,
+                },
+                Err(_) => return -5,
+            };
 
         // Bind UDP socket
         let udp_socket = match UdpSocket::bind("0.0.0.0:0").await {
@@ -247,7 +246,8 @@ pub extern "C" fn rtk_upload_file_with_password(
                 seek_begin,
                 &buffer[..bytes_read],
             )
-            .await {
+            .await
+            {
                 return -7;
             }
 
@@ -263,7 +263,8 @@ pub extern "C" fn rtk_upload_file_with_password(
             file_size,
             &[],
         )
-        .await {
+        .await
+        {
             return -7;
         }
 

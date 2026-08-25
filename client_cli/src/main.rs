@@ -1,8 +1,8 @@
+use clap::Parser;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::Path;
-use clap::Parser;
 use tokio::net::UdpSocket;
 use tokio::time::{timeout, Duration};
 
@@ -125,7 +125,9 @@ async fn main() -> Result<(), String> {
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();
     let mut hash_buf = vec![0u8; 65536];
     loop {
-        let n = file.read(&mut hash_buf).map_err(|e| format!("Lỗi đọc file khi băm: {}", e))?;
+        let n = file
+            .read(&mut hash_buf)
+            .map_err(|e| format!("Lỗi đọc file khi băm: {}", e))?;
         if n == 0 {
             break;
         }
@@ -139,7 +141,10 @@ async fn main() -> Result<(), String> {
     let packet_code_str = common::bytes_to_unique_id(&packet_code_bytes);
     println!("   -> Mã gói tin (Hash ID): {}", packet_code_str);
 
-    let file_size = file.metadata().map_err(|e| format!("Lỗi đọc metadata: {}", e))?.len();
+    let file_size = file
+        .metadata()
+        .map_err(|e| format!("Lỗi đọc metadata: {}", e))?
+        .len();
     let file_name = file_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -183,7 +188,10 @@ async fn main() -> Result<(), String> {
                     }
                 }
             } else {
-                eprintln!("   -> [Cảnh báo] Đăng ký HTTP không thành công: Code {}", resp.status());
+                eprintln!(
+                    "   -> [Cảnh báo] Đăng ký HTTP không thành công: Code {}",
+                    resp.status()
+                );
             }
         }
         Err(e) => {
@@ -206,18 +214,17 @@ async fn main() -> Result<(), String> {
     let mut buffer = vec![0u8; args.block_size];
 
     while seek_begin < file_size {
-        file.seek(SeekFrom::Start(seek_begin)).map_err(|e| format!("Seek thất bại: {}", e))?;
-        let bytes_read = file.read(&mut buffer).map_err(|e| format!("Đọc file thất bại: {}", e))?;
+        file.seek(SeekFrom::Start(seek_begin))
+            .map_err(|e| format!("Seek thất bại: {}", e))?;
+        let bytes_read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("Đọc file thất bại: {}", e))?;
         if bytes_read == 0 {
             break;
         }
 
         if args.log_progress {
-            println!(
-                "   -> Đang tải lên: {} / {}",
-                seek_begin,
-                file_size
-            );
+            println!("   -> Đang tải lên: {} / {}", seek_begin, file_size);
         } else {
             let percent = (seek_begin + bytes_read as u64) as f64 / file_size as f64 * 100.0;
             print!(
@@ -242,11 +249,7 @@ async fn main() -> Result<(), String> {
         seek_begin += bytes_read as u64;
     }
     if args.log_progress {
-        println!(
-            "   -> Đang tải lên: {} / {}",
-            file_size,
-            file_size
-        );
+        println!("   -> Đang tải lên: {} / {}", file_size, file_size);
     } else {
         println!();
     }
@@ -259,10 +262,13 @@ async fn main() -> Result<(), String> {
         0, // Trạng thái kết thúc: 0
         &packet_code_bytes,
         file_size, // seek begin khớp với độ dài file
-        &[], // không có dữ liệu
+        &[],       // không có dữ liệu
     )
     .await?;
 
-    println!("🎉 Tải file lên thành công! Mã Hash ID: {}", packet_code_str);
+    println!(
+        "🎉 Tải file lên thành công! Mã Hash ID: {}",
+        packet_code_str
+    );
     Ok(())
 }

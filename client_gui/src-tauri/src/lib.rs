@@ -22,10 +22,11 @@ fn get_file_size(file_path: String) -> Result<u64, String> {
 fn create_demo_file(content: String, file_name: String) -> Result<String, String> {
     let temp_dir = std::env::temp_dir();
     let file_path = temp_dir.join(&file_name);
-    
+
     let mut file = File::create(&file_path).map_err(|e| e.to_string())?;
-    file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
-    
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())?;
+
     Ok(file_path.to_string_lossy().into_owned())
 }
 
@@ -40,7 +41,10 @@ async fn calculate_hash(file_path: String) -> Result<String, String> {
             out_buf.len(),
         );
         if res == 0 {
-            let len = out_buf.iter().position(|&x| x == 0).unwrap_or(out_buf.len());
+            let len = out_buf
+                .iter()
+                .position(|&x| x == 0)
+                .unwrap_or(out_buf.len());
             let hash_str = std::str::from_utf8(&out_buf[..len])
                 .map_err(|e| e.to_string())?
                 .to_string();
@@ -65,12 +69,14 @@ async fn perform_upload(
     tokio::task::spawn_blocking(move || {
         let c_file_path = CString::new(file_path).map_err(|e| e.to_string())?;
         let c_server_ip = CString::new(server_ip).map_err(|e| e.to_string())?;
-        
+
         let c_password = match password {
-            Some(ref p) if !p.is_empty() => Some(CString::new(p.clone()).map_err(|e| e.to_string())?),
+            Some(ref p) if !p.is_empty() => {
+                Some(CString::new(p.clone()).map_err(|e| e.to_string())?)
+            }
             _ => None,
         };
-        
+
         let pwd_ptr = match c_password {
             Some(ref cp) => cp.as_ptr(),
             None => std::ptr::null(),
@@ -84,7 +90,7 @@ async fn perform_upload(
             block_size,
             pwd_ptr,
         );
-        
+
         Ok(res)
     })
     .await

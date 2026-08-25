@@ -50,7 +50,8 @@ pub fn encode_number_to_bytes(val: u64) -> Vec<u8> {
 /// by formatting each byte as a decimal string, concatenating them, and parsing.
 pub fn decode_bytes_to_number(bytes: &[u8]) -> Result<u64, String> {
     let s: String = bytes.iter().map(|b| b.to_string()).collect();
-    s.parse::<u64>().map_err(|e| format!("Failed to parse '{}' as u64: {}", s, e))
+    s.parse::<u64>()
+        .map_err(|e| format!("Failed to parse '{}' as u64: {}", s, e))
 }
 
 /// Formats a sequence of bytes (like the packet code) as a concatenated decimal string unique ID.
@@ -62,10 +63,7 @@ pub fn bytes_to_unique_id(bytes: &[u8]) -> String {
 /// It takes the first 10 bytes (or all available if less than 10) and maps them to `0..=254` using `byte % 255`.
 pub fn generate_packet_code_from_hash(hash_bytes: &[u8]) -> Vec<u8> {
     let take_len = hash_bytes.len().min(10);
-    hash_bytes[0..take_len]
-        .iter()
-        .map(|&b| b % 255)
-        .collect()
+    hash_bytes[0..take_len].iter().map(|&b| b % 255).collect()
 }
 
 /// Representation of a parsed UDP transmission packet.
@@ -226,7 +224,7 @@ mod tests {
         let code = vec![125, 254, 65, 0, 110, 48];
         let data = vec![1, 2, 3, 4];
         let serialized = UdpPacket::serialize(1, &code, 16384, &data);
-        
+
         let parsed = UdpPacket::parse(&serialized).unwrap();
         assert_eq!(parsed.status, 1);
         assert_eq!(parsed.packet_code, &code[..]);

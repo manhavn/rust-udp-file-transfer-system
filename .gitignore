@@ -1,5 +1,9 @@
 # Rust build artifacts
 /target
+/dist
+.intentionally-empty-file.o
+.mise.toml
+*.code-workspace
 
 # Local test data and uploads
 /uploads
