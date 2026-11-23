@@ -67,7 +67,6 @@ async fn send_windowed_file(
     log_progress: bool,
 ) -> Result<(), String> {
     let mut next_offset = start_offset;
-    let mut acked_bytes = start_offset;
     let mut in_flight: BTreeMap<u64, InFlightChunk> = BTreeMap::new();
     let mut read_buf = vec![0u8; block_size];
     let mut ack_buf = [0u8; 1024];
@@ -108,7 +107,7 @@ async fn send_windowed_file(
                         if let Some(chunk) = in_flight.get(&ack.seek_begin) {
                             if ack.bytes_received == chunk.expected_len {
                                 in_flight.remove(&ack.seek_begin);
-                                acked_bytes = next_offset.saturating_sub(
+                                let acked_bytes = next_offset.saturating_sub(
                                     in_flight.values().map(|c| c.expected_len).sum::<u64>(),
                                 );
                                 if log_progress {

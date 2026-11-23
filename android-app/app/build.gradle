@@ -46,6 +46,11 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion '1.5.1'
     }
+    packaging {
+        jniLibs {
+            keepDebugSymbols += ['**/libclient_lib.so', '**/libjnidispatch.so']
+        }
+    }
 }
 
 dependencies {
