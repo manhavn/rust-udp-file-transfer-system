@@ -75,4 +75,4 @@ npm run tauri build
 echo "----------------------------------------------------------"
 echo -e "${GREEN}✔ Quá trình đóng gói thành công!${NC}"
 echo -e "Tệp tin cài đặt ứng dụng đã được xuất ra tại:"
-echo -e "${YELLOW}client_gui/src-tauri/target/release/bundle/${NC}"
+echo -e "${YELLOW}target/release/bundle/${NC}"

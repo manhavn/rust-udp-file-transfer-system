@@ -90,7 +90,7 @@ build_gui() {
     npm run tauri build
   )
 
-  local bundle="client_gui/src-tauri/target/release/bundle" file copied=0
+  local bundle="target/release/bundle" file copied=0
   [[ -d "$bundle" ]] || { warn "GUI bundle directory missing: $bundle"; return 0; }
   while IFS= read -r -d '' file; do
     cp -f "$file" "$OUTPUTS_DIR/"
