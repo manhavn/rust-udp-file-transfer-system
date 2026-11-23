@@ -87,6 +87,8 @@ build_gui() {
   (
     cd client_gui
     [[ -d node_modules ]] || npm install
+    # Drop a binary already stamped with a bundle type so Tauri can stamp the new bundles.
+    rm -f "$ROOT/target/release/client_gui" "$ROOT/target/release/client_gui.exe"
     npm run tauri build
   )
 
