@@ -51,7 +51,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -310,7 +309,6 @@ private fun UdpTransferTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = scheme, content = content)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun UdpUploadApp(
     uploadHistory: List<UploadHistoryItem>,
@@ -321,20 +319,6 @@ private fun UdpUploadApp(
     val stateHolder = rememberSaveableStateHolder()
 
     Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("UDP File Transfer", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Gửi file nhanh tới server của bạn",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            )
-        },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(

@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -6,6 +5,7 @@ use std::net::SocketAddr;
 use std::os::raw::c_char;
 use std::path::Path;
 use tokio::net::UdpSocket;
+use std::collections::BTreeMap;
 use tokio::time::{timeout, Duration, Instant};
 
 const MAX_RETRIES: usize = 30;
@@ -44,32 +44,21 @@ async fn send_windowed_file(
     let mut in_flight: BTreeMap<u64, InFlightChunk> = BTreeMap::new();
     let mut read_buf = vec![0u8; block_size];
     let mut ack_buf = [0u8; 1024];
-    file.seek(SeekFrom::Start(start_offset))
-        .map_err(|e| e.to_string())?;
+    file.seek(SeekFrom::Start(start_offset)).map_err(|e| e.to_string())?;
 
     while next_offset < file_size || !in_flight.is_empty() {
         while next_offset < file_size && in_flight.len() < window_size {
             let to_read = ((file_size - next_offset) as usize).min(block_size);
-            let n = file
-                .read(&mut read_buf[..to_read])
-                .map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
-            }
+            let n = file.read(&mut read_buf[..to_read]).map_err(|e| e.to_string())?;
+            if n == 0 { break; }
             let packet = common::UdpPacket::serialize(1, packet_code, next_offset, &read_buf[..n]);
-            socket
-                .send_to(&packet, server_addr)
-                .await
-                .map_err(|e| e.to_string())?;
-            in_flight.insert(
-                next_offset,
-                InFlightChunk {
-                    packet,
-                    expected_len: n as u64,
-                    last_sent: Instant::now(),
-                    retries: 0,
-                },
-            );
+            socket.send_to(&packet, server_addr).await.map_err(|e| e.to_string())?;
+            in_flight.insert(next_offset, InFlightChunk {
+                packet,
+                expected_len: n as u64,
+                last_sent: Instant::now(),
+                retries: 0,
+            });
             next_offset += n as u64;
         }
 
@@ -77,34 +66,27 @@ async fn send_windowed_file(
             Ok(Ok((len, src))) if src == server_addr => {
                 if let Ok(ack) = common::AckPacket::parse(&ack_buf[..len]) {
                     if ack.packet_code == packet_code {
-                        let valid = in_flight
-                            .get(&ack.seek_begin)
-                            .map(|c| c.expected_len == ack.bytes_received)
-                            .unwrap_or(false);
+                        let valid = in_flight.get(&ack.seek_begin)
+                            .map(|c| c.expected_len == ack.bytes_received).unwrap_or(false);
                         if valid {
                             if let Some(chunk) = in_flight.remove(&ack.seek_begin) {
-                                confirmed_bytes =
-                                    confirmed_bytes.saturating_add(chunk.expected_len);
+                                confirmed_bytes = confirmed_bytes.saturating_add(chunk.expected_len);
                                 if let Some(callback) = progress_callback {
                                     let now = Instant::now();
                                     let should_report = last_progress_report
                                         .map(|last| now.duration_since(last) >= PROGRESS_INTERVAL)
                                         .unwrap_or(true)
-                                        || start_offset.saturating_add(confirmed_bytes)
-                                            >= file_size;
+                                        || start_offset.saturating_add(confirmed_bytes) >= file_size;
 
                                     if should_report {
-                                        let elapsed =
-                                            now.duration_since(transfer_started).as_secs_f64();
+                                        let elapsed = now.duration_since(transfer_started).as_secs_f64();
                                         let bytes_per_second = if elapsed > 0.0 {
                                             (confirmed_bytes as f64 / elapsed) as u64
                                         } else {
                                             0
                                         };
                                         callback(
-                                            start_offset
-                                                .saturating_add(confirmed_bytes)
-                                                .min(file_size),
+                                            start_offset.saturating_add(confirmed_bytes).min(file_size),
                                             file_size,
                                             bytes_per_second,
                                         );
@@ -124,15 +106,9 @@ async fn send_windowed_file(
         for (&offset, chunk) in in_flight.iter_mut() {
             if now.duration_since(chunk.last_sent) >= ACK_TIMEOUT {
                 if chunk.retries >= MAX_RETRIES {
-                    return Err(format!(
-                        "Timeout at offset {} after {} retries",
-                        offset, MAX_RETRIES
-                    ));
+                    return Err(format!("Timeout at offset {} after {} retries", offset, MAX_RETRIES));
                 }
-                socket
-                    .send_to(&chunk.packet, server_addr)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                socket.send_to(&chunk.packet, server_addr).await.map_err(|e| e.to_string())?;
                 chunk.retries += 1;
                 chunk.last_sent = Instant::now();
             }
@@ -142,27 +118,16 @@ async fn send_windowed_file(
 }
 
 async fn send_end_with_retry(
-    socket: &UdpSocket,
-    server_addr: SocketAddr,
-    packet_code: &[u8],
-    file_size: u64,
+    socket: &UdpSocket, server_addr: SocketAddr, packet_code: &[u8], file_size: u64,
 ) -> Result<(), String> {
     let packet = common::UdpPacket::serialize(0, packet_code, file_size, &[]);
     let mut ack_buf = [0u8; 1024];
     for _ in 0..=MAX_RETRIES {
-        socket
-            .send_to(&packet, server_addr)
-            .await
-            .map_err(|e| e.to_string())?;
+        socket.send_to(&packet, server_addr).await.map_err(|e| e.to_string())?;
         if let Ok(Ok((len, src))) = timeout(ACK_TIMEOUT, socket.recv_from(&mut ack_buf)).await {
             if src == server_addr {
                 if let Ok(ack) = common::AckPacket::parse(&ack_buf[..len]) {
-                    if ack.packet_code == packet_code
-                        && ack.seek_begin == file_size
-                        && ack.bytes_received == 0
-                    {
-                        return Ok(());
-                    }
+                    if ack.packet_code == packet_code && ack.seek_begin == file_size && ack.bytes_received == 0 { return Ok(()); }
                 }
             }
         }
@@ -410,9 +375,14 @@ fn upload_file_impl(
             return -7;
         }
 
-        if send_end_with_retry(&udp_socket, server_udp_addr, &packet_code_bytes, file_size)
-            .await
-            .is_err()
+        if send_end_with_retry(
+            &udp_socket,
+            server_udp_addr,
+            &packet_code_bytes,
+            file_size,
+        )
+        .await
+        .is_err()
         {
             return -7;
         }
