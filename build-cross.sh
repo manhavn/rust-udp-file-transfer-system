@@ -10,6 +10,7 @@ export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
 PROJECT_NAME="rust-udp-file-transfer-system"
 BIN_NAMES=("server" "client_cli")
+BIN_OUT_NAMES=("rtk-udp-server" "rtk-udp-client")
 DEFAULT_TARGETS="x86_64-unknown-linux-gnu,x86_64-unknown-linux-musl,aarch64-unknown-linux-gnu,aarch64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-gnu"
 TARGETS_CSV="${TARGETS:-$DEFAULT_TARGETS}"
 
@@ -58,10 +59,12 @@ for target in "${BUILD_TARGETS[@]}"; do
   target_dist="$DIST_DIR/$target"
   mkdir -p "$target_dist"
   ext=""; [[ "$target" == *windows* ]] && ext=".exe"
-  for bin in "${BIN_NAMES[@]}"; do
+  for i in "${!BIN_NAMES[@]}"; do
+    bin="${BIN_NAMES[$i]}"
+    out="${BIN_OUT_NAMES[$i]}${ext}"
     src="$ROOT/target/$target/release/${bin}${ext}"
     [[ -f "$src" ]] || fail "binary not found: $src"
-    cp -f "$src" "$target_dist/"
+    cp -f "$src" "$target_dist/$out"
   done
   package_target "$target"
   built+=("$target")
@@ -72,9 +75,9 @@ if [[ -d "$DIST_DIR/x86_64-apple-darwin" && -d "$DIST_DIR/aarch64-apple-darwin" 
   if [[ -n "$lipo_cmd" ]]; then
     universal_dir="$DIST_DIR/universal-apple-darwin"
     mkdir -p "$universal_dir"
-    for bin in "${BIN_NAMES[@]}"; do
-      "$lipo_cmd" -create "$DIST_DIR/x86_64-apple-darwin/$bin" "$DIST_DIR/aarch64-apple-darwin/$bin" -output "$universal_dir/$bin"
-      chmod +x "$universal_dir/$bin"
+    for out in "${BIN_OUT_NAMES[@]}"; do
+      "$lipo_cmd" -create "$DIST_DIR/x86_64-apple-darwin/$out" "$DIST_DIR/aarch64-apple-darwin/$out" -output "$universal_dir/$out"
+      chmod +x "$universal_dir/$out"
     done
     package_target "universal-apple-darwin"
     built+=("universal-apple-darwin")

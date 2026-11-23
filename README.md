@@ -68,6 +68,14 @@ Thư mục `outputs/` chứa archive `server` + `client_cli` cho từng target, 
 
 Mặc định `build_all.sh` dựng artifact vào thư mục staging tạm rồi mới thay `outputs/` sau khi tất cả component chạy xong, nên `outputs/` luôn sạch, không còn file của lần build trước. Nếu một component lỗi, các artifact đã build thành công vẫn được publish, các component còn lại vẫn tiếp tục chạy, script exit 1 và liệt kê component lỗi. Dùng `--keep` nếu muốn giữ file đang có trong `outputs/`.
 
+Trong archive phát hành, binary server/CLI được đổi tên thành `rtk-udp-server` và `rtk-udp-client` để không trùng với lệnh của app khác. Cài trực tiếp từ GitHub Release bằng mise:
+```bash
+mise use -g github:manhavn/rust-udp-file-transfer-system
+rtk-udp-server --help
+rtk-udp-client --help
+```
+Desktop app hiển thị trong menu là **RTK UDP Transfer**.
+
 ---
 
 ## 4. Hướng Dẫn Sử Dụng & Các Lệnh Ví Dụ (Examples)

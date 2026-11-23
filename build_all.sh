@@ -112,10 +112,16 @@ build_gui() {
     npm run tauri build
   ) || rc=$?
 
-  local bundle="target/release/bundle" file copied=0
+  local bundle="target/release/bundle" file name ext stem dest copied=0
   if [[ -d "$bundle" ]]; then
     while IFS= read -r -d '' file; do
-      cp -f "$file" "$STAGE_OUT/"
+      name="$(basename "$file")"
+      ext="${name##*.}"
+      stem="${name%.*}"
+      stem="${stem,,}"
+      stem="${stem// /-}"
+      dest="$STAGE_OUT/${stem}.${ext}"
+      cp -f "$file" "$dest"
       copied=$((copied + 1))
     done < <(find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
              -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \) -print0)
