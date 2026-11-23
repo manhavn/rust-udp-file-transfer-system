@@ -10,9 +10,13 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "client_gui",
-        "width": 800,
-        "height": 600
+        "title": "UDP Secure Transfer",
+        "width": 1080,
+        "height": 760,
+        "minWidth": 680,
+        "minHeight": 560,
+        "center": true,
+        "resizable": true
       }
     ],
     "security": {

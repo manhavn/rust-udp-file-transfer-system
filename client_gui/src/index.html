@@ -3,130 +3,213 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UDP Secure File Transfer</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta name="color-scheme" content="dark" />
+    <title>UDP Secure Transfer</title>
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="/main.js" defer></script>
   </head>
 
   <body>
-    <div class="app-container">
-      <header class="app-header">
-        <div class="logo-area">
-          <svg class="app-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-          </svg>
-          <h1>UDP Secure Transfer</h1>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v12" />
+              <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+              <path d="M5 20h14" />
+            </svg>
+          </div>
+          <div>
+            <h1>UDP Secure Transfer</h1>
+            <p>Desktop client · Linux</p>
+          </div>
         </div>
-        <span class="badge">Desktop Client</span>
+        <div class="topbar-meta">
+          <span class="shortcut-hint"><kbd>Ctrl</kbd><span>+</span><kbd>O</kbd> chọn file</span>
+        </div>
       </header>
 
       <main class="main-content">
-        <!-- Status Card -->
-        <section class="card status-card">
-          <div class="card-header">
-            <span class="label">TRẠNG THÁI:</span>
+        <section id="status-card" class="status-banner" data-state="idle" aria-live="polite">
+          <div class="status-indicator" aria-hidden="true">
+            <span class="status-dot"></span>
           </div>
-          <div class="status-content">
-            <p id="status-text" class="status-text monospace">Chọn một file hoặc tạo file demo để bắt đầu.</p>
+          <div class="status-copy">
+            <div class="status-heading-row">
+              <strong id="status-label">Sẵn sàng</strong>
+              <span id="status-endpoint" class="endpoint-pill">Chưa cấu hình server</span>
+            </div>
+            <p id="status-text">Chọn file cần gửi và nhập địa chỉ server để bắt đầu.</p>
           </div>
+          <div class="activity-line" aria-hidden="true"><span></span></div>
         </section>
 
-        <div class="grid-layout">
-          <!-- Column 1: File Source -->
-          <section class="card form-section">
-            <h2 class="section-title">1. NGUỒN FILE TRUYỀN TẢI</h2>
-            
-            <div class="form-group">
-              <label for="input-file-name">Tên File trước khi lưu & upload</label>
-              <input type="text" id="input-file-name" placeholder="demo_data.bin" value="demo_data.bin" />
+        <div class="workspace-grid">
+          <section class="panel transfer-panel">
+            <div class="panel-header">
+              <div>
+                <span class="eyebrow">Truyền dữ liệu</span>
+                <h2>Gửi file</h2>
+              </div>
+              <span class="step-badge">1</span>
             </div>
 
-            <div class="form-group">
-              <button type="button" id="btn-choose-file" class="btn btn-primary">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                Chọn File Từ Máy Tính
+            <input type="hidden" id="input-file-path" />
+
+            <div id="file-picker" class="file-picker">
+              <div class="file-visual" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                  <path d="M12 18v-6" />
+                  <path d="m9.5 14.5 2.5-2.5 2.5 2.5" />
+                </svg>
+              </div>
+              <div class="file-picker-copy">
+                <strong id="selected-file-name">Chưa chọn file</strong>
+                <span id="selected-file-meta">Chọn một file bất kỳ trên máy tính</span>
+                <span id="selected-file-path" class="file-path">Đường dẫn file sẽ hiển thị tại đây</span>
+              </div>
+              <button type="button" id="btn-choose-file" class="btn btn-secondary compact-btn">Chọn file</button>
+            </div>
+
+            <div class="transfer-actions">
+              <button type="button" id="btn-start-upload" class="btn btn-primary btn-large" disabled>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 19V5" />
+                  <path d="m5 12 7-7 7 7" />
+                </svg>
+                <span>Gửi file</span>
+              </button>
+              <button type="button" id="btn-bg-upload" class="btn btn-ghost btn-large" disabled>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2v4" />
+                  <path d="M12 18v4" />
+                  <path d="m4.93 4.93 2.83 2.83" />
+                  <path d="m16.24 16.24 2.83 2.83" />
+                  <path d="M2 12h4" />
+                  <path d="M18 12h4" />
+                  <path d="m4.93 19.07 2.83-2.83" />
+                  <path d="m16.24 7.76 2.83-2.83" />
+                </svg>
+                <span>Gửi nền</span>
               </button>
             </div>
+            <p class="action-help">Gửi nền cho phép bạn tiếp tục thao tác trong ứng dụng trong khi tác vụ đang chạy. <kbd>Ctrl</kbd> + <kbd>Enter</kbd> để gửi nhanh.</p>
 
-            <div class="form-group">
-              <label for="input-demo-content">Nội dung file demo tự tạo</label>
-              <textarea id="input-demo-content" rows="3">Nội dung thử nghiệm của file demo truyền tải UDP.</textarea>
-            </div>
-
-            <div class="form-group">
-              <button type="button" id="btn-create-demo" class="btn btn-secondary">
-                Tạo File Demo từ Nội dung trên
-              </button>
-            </div>
-
-            <div class="form-group">
-              <label for="input-file-path">Đường dẫn File được chọn để Upload</label>
-              <input type="text" id="input-file-path" class="readonly-input monospace" readonly placeholder="Chưa có file nào được chọn" />
-            </div>
+            <details class="collapsible demo-tools">
+              <summary>
+                <span>
+                  <strong>Tạo file thử nghiệm</strong>
+                  <small>Dùng khi cần test nhanh server mà không có file sẵn</small>
+                </span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+              </summary>
+              <div class="collapsible-body">
+                <div class="form-group">
+                  <label for="input-file-name">Tên file</label>
+                  <input type="text" id="input-file-name" placeholder="demo_data.bin" value="demo_data.bin" />
+                </div>
+                <div class="form-group">
+                  <label for="input-demo-content">Nội dung</label>
+                  <textarea id="input-demo-content" rows="4">Nội dung thử nghiệm của file demo truyền tải UDP.</textarea>
+                </div>
+                <button type="button" id="btn-create-demo" class="btn btn-secondary">Tạo và chọn file demo</button>
+              </div>
+            </details>
           </section>
 
-          <!-- Column 2: Server Configurations -->
-          <section class="card form-section">
-            <h2 class="section-title">2. CẤU HÌNH KẾT NỐI SERVER</h2>
-
-            <div class="form-group">
-              <label for="input-server-ip">Địa chỉ IP Server</label>
-              <input type="text" id="input-server-ip" placeholder="Ví dụ: 127.0.0.1 hoặc 192.168.1.100" />
-            </div>
-
-            <div class="row-group">
-              <div class="form-group">
-                <label for="input-udp-port">Cổng UDP</label>
-                <input type="number" id="input-udp-port" value="5000" min="1" max="65535" />
+          <aside class="panel server-panel">
+            <div class="panel-header">
+              <div>
+                <span class="eyebrow">Đích nhận</span>
+                <h2>Máy chủ</h2>
               </div>
-              <div class="form-group">
-                <label for="input-http-port">Cổng HTTP</label>
-                <input type="number" id="input-http-port" value="8080" min="1" max="65535" />
-              </div>
+              <span class="step-badge">2</span>
             </div>
 
             <div class="form-group">
-              <label for="input-block-size">Kích thước Block (bytes)</label>
-              <input type="number" id="input-block-size" value="16384" min="512" />
+              <label for="input-server-ip">Địa chỉ server</label>
+              <input type="text" id="input-server-ip" spellcheck="false" autocomplete="off" placeholder="192.168.1.100" />
+              <span class="field-help">IPv4, IPv6 hoặc hostname có thể phân giải được.</span>
             </div>
 
             <div class="form-group password-group">
-              <label for="input-password">Mật khẩu (Tùy chọn)</label>
+              <label for="input-password">Mật khẩu <span class="optional">tùy chọn</span></label>
               <div class="password-wrapper">
-                <input type="password" id="input-password" placeholder="Nhập mật khẩu nếu server yêu cầu" />
-                <button type="button" id="btn-toggle-password" class="btn-toggle">Hiện</button>
+                <input type="password" id="input-password" autocomplete="off" placeholder="Chỉ nhập khi server yêu cầu" />
+                <button type="button" id="btn-toggle-password" class="inline-action">Hiện</button>
               </div>
             </div>
-          </section>
+
+            <div class="connection-summary">
+              <div class="summary-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="6" rx="2" />
+                  <rect x="3" y="14" width="18" height="6" rx="2" />
+                  <path d="M7 7h.01" />
+                  <path d="M7 17h.01" />
+                </svg>
+              </div>
+              <div>
+                <span>Endpoint hiện tại</span>
+                <strong id="connection-preview">Chưa cấu hình</strong>
+              </div>
+            </div>
+
+            <details class="collapsible advanced-settings">
+              <summary>
+                <span>
+                  <strong>Cài đặt nâng cao</strong>
+                  <small>Cổng mạng và kích thước block</small>
+                </span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+              </summary>
+              <div class="collapsible-body">
+                <div class="row-group">
+                  <div class="form-group">
+                    <label for="input-udp-port">UDP port</label>
+                    <input type="number" id="input-udp-port" value="5000" min="1" max="65535" />
+                  </div>
+                  <div class="form-group">
+                    <label for="input-http-port">HTTP port</label>
+                    <input type="number" id="input-http-port" value="8080" min="1" max="65535" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="input-block-size">Block size <span class="optional">bytes</span></label>
+                  <input type="number" id="input-block-size" value="16384" min="512" />
+                  <span class="field-help">Mặc định 16 KiB. Chỉ đổi khi bạn biết cấu hình server phù hợp.</span>
+                </div>
+              </div>
+            </details>
+
+            <p class="autosave-note">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+              Cấu hình được tự động lưu trên máy này.
+            </p>
+          </aside>
         </div>
 
-        <!-- Action Buttons -->
-        <section class="actions-section">
-          <button type="button" id="btn-start-upload" class="btn btn-action btn-upload-direct">
-            BẮT ĐẦU TẢI LÊN (DIRECT UDP)
-          </button>
-          <button type="button" id="btn-bg-upload" class="btn btn-action btn-upload-bg">
-            TẢI LÊN NỀN (ASYNCHRONOUS WORKER)
-          </button>
-        </section>
-
-        <!-- Upload History -->
-        <section class="card history-section">
+        <section class="panel history-section">
           <div class="history-header">
-            <h2 class="section-title">3. LỊCH SỬ TẢI LÊN (<span id="history-count">0</span>)</h2>
-            <button type="button" id="btn-clear-history" class="btn-clear" style="display: none;">Xóa lịch sử</button>
+            <div>
+              <span class="eyebrow">Hoạt động gần đây</span>
+              <h2>Lịch sử truyền <span id="history-count" class="count-badge">0</span></h2>
+            </div>
+            <button type="button" id="btn-clear-history" class="text-button danger" hidden>Xóa lịch sử</button>
           </div>
-          
+
           <div id="history-empty" class="history-empty">
-            <p>Chưa có file nào được tải lên</p>
+            <div class="empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18" /><path d="m7 16 4-4 3 3 5-6" /></svg>
+            </div>
+            <strong>Chưa có lượt truyền nào</strong>
+            <span>Kết quả gửi file sẽ xuất hiện tại đây.</span>
           </div>
-          
-          <div id="history-list" class="history-list">
-            <!-- Dynamic items go here -->
-          </div>
+
+          <div id="history-list" class="history-list" hidden></div>
         </section>
       </main>
     </div>
