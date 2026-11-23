@@ -10,7 +10,7 @@ export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
 PROJECT_NAME="rust-udp-file-transfer-system"
 BIN_NAMES=("server" "client_cli")
-DEFAULT_TARGETS="x86_64-unknown-linux-gnu,x86_64-unknown-linux-musl,aarch64-unknown-linux-gnu,aarch64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-gnu,aarch64-pc-windows-gnullvm"
+DEFAULT_TARGETS="x86_64-unknown-linux-gnu,x86_64-unknown-linux-musl,aarch64-unknown-linux-gnu,aarch64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-gnu"
 TARGETS_CSV="${TARGETS:-$DEFAULT_TARGETS}"
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -29,7 +29,7 @@ if [[ "$TARGETS_CSV" == *apple-darwin* ]]; then
 fi
 
 cargo fmt --all --check
-DIST_DIR="$ROOT/dist"
+DIST_DIR="${DIST_DIR:-$ROOT/dist}"
 [[ "$DIST_DIR" != "/" && "$DIST_DIR" != "$ROOT" ]] || fail "unsafe dist path: $DIST_DIR"
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR/packages"

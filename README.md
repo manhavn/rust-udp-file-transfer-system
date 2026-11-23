@@ -55,6 +55,16 @@ Các tệp nhị phân đầu ra sẽ nằm tại thư mục `target/release/`.
 
 Khi chạy, kịch bản sẽ hiển thị một menu để bạn lựa chọn môi trường đích mong muốn, tự động thêm target tương ứng thông qua `rustup` và tiến hành biên dịch ra file thực thi ở chế độ tối ưu (`--release`).
 
+### 3.3. Build toàn bộ cho GitHub Release (`build_all.sh`)
+Lệnh `build all` tạo toàn bộ gói phát hành mà máy hiện tại có thể biên dịch vào thư mục `outputs/` (đã gitignore), sẵn sàng upload thủ công lên GitHub Release:
+```bash
+./build_all.sh              # tương đương ./build_all.sh all
+./build_all.sh android      # chỉ build APK Android release đã ký
+./build_all.sh rust gui     # chỉ build archive Rust và gói Desktop GUI
+TARGETS=x86_64-unknown-linux-musl ./build_all.sh rust
+```
+Thư mục `outputs/` chứa archive `server` + `client_cli` cho từng target, gói cài Desktop GUI của nền tảng hiện tại (bỏ qua kèm cảnh báo nếu thiếu toolchain WebKitGTK/GTK), APK Android và `SHA256SUMS.txt`. Phiên bản lấy từ `common/Cargo.toml`, có thể ghi đè bằng biến môi trường `VERSION`.
+
 ---
 
 ## 4. Hướng Dẫn Sử Dụng & Các Lệnh Ví Dụ (Examples)

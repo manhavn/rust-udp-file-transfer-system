@@ -1,6 +1,7 @@
 # Rust build artifacts
 /target
 /dist
+/outputs
 .intentionally-empty-file.o
 .mise.toml
 *.code-workspace
