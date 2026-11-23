@@ -61,9 +61,12 @@ Lệnh `build all` tạo toàn bộ gói phát hành mà máy hiện tại có t
 ./build_all.sh              # tương đương ./build_all.sh all
 ./build_all.sh android      # chỉ build APK Android release đã ký
 ./build_all.sh rust gui     # chỉ build archive Rust và gói Desktop GUI
+./build_all.sh --clean      # xóa outputs/ trước khi build
 TARGETS=x86_64-unknown-linux-musl ./build_all.sh rust
 ```
 Thư mục `outputs/` chứa archive `server` + `client_cli` cho từng target, gói cài Desktop GUI của nền tảng hiện tại (bỏ qua kèm cảnh báo nếu thiếu toolchain WebKitGTK/GTK), APK Android và `SHA256SUMS.txt`. Phiên bản lấy từ `common/Cargo.toml`, có thể ghi đè bằng biến môi trường `VERSION`.
+
+Mặc định `build_all.sh` không xóa `outputs/`: mỗi component copy artifact vào ngay khi build xong, nên nếu một component lỗi thì các file đã build vẫn còn và các component còn lại vẫn tiếp tục chạy (script exit 1 và liệt kê component lỗi). Dùng `--clean` khi cần thư mục release sạch.
 
 ---
 
