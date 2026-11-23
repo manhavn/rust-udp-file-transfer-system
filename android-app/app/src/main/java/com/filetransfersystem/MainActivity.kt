@@ -1,43 +1,105 @@
 package com.filetransfersystem
 
+import android.content.ClipData
+import android.Manifest
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Divider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.workDataOf
-import kotlinx.coroutines.CoroutineScope
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import android.util.Log
-import android.content.ClipboardManager
-import android.content.ClipData
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -45,6 +107,11 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private const val PREFS_NAME = "udp_transfer_prefs"
+private const val DEFAULT_UDP_PORT = 5000
+private const val DEFAULT_HTTP_PORT = 8080
+private const val DEFAULT_BLOCK_SIZE = 16384
 
 data class UploadHistoryItem(
     val fileName: String,
@@ -56,8 +123,29 @@ data class UploadHistoryItem(
     val statusMsg: String
 )
 
+data class UploadConfig(
+    val filePath: String,
+    val serverIp: String,
+    val udpPort: Int,
+    val httpPort: Int,
+    val blockSize: Int,
+    val password: String?
+)
+
+private enum class AppSection {
+    TRANSFER,
+    HISTORY
+}
+
+private enum class UploadStatusTone {
+    IDLE,
+    RUNNING,
+    SUCCESS,
+    ERROR
+}
+
 fun loadUploadHistory(context: Context): List<UploadHistoryItem> {
-    val prefs = context.getSharedPreferences("udp_transfer_prefs", Context.MODE_PRIVATE)
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val historyJson = prefs.getString("upload_history", "[]") ?: "[]"
     val list = mutableListOf<UploadHistoryItem>()
     try {
@@ -83,7 +171,7 @@ fun loadUploadHistory(context: Context): List<UploadHistoryItem> {
 }
 
 fun saveUploadHistory(context: Context, history: List<UploadHistoryItem>) {
-    val prefs = context.getSharedPreferences("udp_transfer_prefs", Context.MODE_PRIVATE)
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     try {
         val jsonArray = JSONArray()
         history.take(50).forEach { item ->
@@ -108,168 +196,174 @@ fun formatFileSize(size: Long): String {
     if (size <= 0) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
     val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-    return String.format(Locale.US, "%.2f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
+        .coerceIn(0, units.lastIndex)
+    return String.format(
+        Locale.US,
+        "%.2f %s",
+        size / Math.pow(1024.0, digitGroups.toDouble()),
+        units[digitGroups]
+    )
 }
 
 fun formatTimestamp(timestamp: Long): String {
-    val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+    val sdf = SimpleDateFormat("dd/MM/yyyy · HH:mm", Locale.getDefault())
     return sdf.format(Date(timestamp))
 }
+
+fun formatTransferRate(bytesPerSecond: Long): String {
+    return if (bytesPerSecond <= 0L) "Đang đo tốc độ…" else "${formatFileSize(bytesPerSecond)}/s"
+}
+
+fun formatEta(seconds: Long?): String = when {
+    seconds == null -> "ETA đang tính…"
+    seconds <= 0L -> "Sắp hoàn tất"
+    seconds < 60L -> "Còn ~${seconds}s"
+    seconds < 3600L -> "Còn ~${seconds / 60} phút ${seconds % 60}s"
+    else -> "Còn ~${seconds / 3600} giờ ${(seconds % 3600) / 60} phút"
+}
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+        UploadServiceState.restore(this)
+
         setContent {
-            // Dark Color Scheme
-            val darkColorScheme = darkColorScheme(
-                primary = Color(0xFF6200EE),
-                secondary = Color(0xFF03DAC6),
-                background = Color(0xFF121212),
-                surface = Color(0xFF1E1E1E),
-                onPrimary = Color.White,
-                onSecondary = Color.Black,
-                onBackground = Color(0xFFE0E0E0),
-                onSurface = Color(0xFFE0E0E0),
-            )
+            UdpTransferTheme {
+                val context = this@MainActivity
+                var uploadHistory by remember { mutableStateOf(loadUploadHistory(context)) }
+                val foregroundState by UploadServiceState.state.collectAsState()
 
-            MaterialTheme(colorScheme = darkColorScheme) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val context = LocalContext.current
-                    var uploadHistory by remember { mutableStateOf(loadUploadHistory(context)) }
+                LaunchedEffect(foregroundState.updatedAt, foregroundState.running) {
+                    if (!foregroundState.running && foregroundState.resultCode != null) {
+                        uploadHistory = loadUploadHistory(context)
+                    }
+                }
 
-                    UdpUploadScreen(
-                        uploadHistory = uploadHistory,
-                        onClearHistory = {
-                            uploadHistory = emptyList()
-                            saveUploadHistory(context, emptyList())
-                        },
-                        onStartUpload = { filePath, ip, udpPort, httpPort, blockSize, password, onStatusChange ->
-                            CoroutineScope(Dispatchers.Main).launch {
-                                onStatusChange("Đang tính toán hash và bắt đầu tải lên...")
-                                val fileHash = withContext(Dispatchers.IO) {
-                                    RustUploader.calculateHashId(filePath)
-                                }
-                                Log.i("MainActivity", "Starting upload: $filePath, Hash ID: $fileHash")
-                                val code = RustUploader.performUpload(
-                                    filePath = filePath,
-                                    serverIp = ip,
-                                    udpPort = udpPort,
-                                    httpPort = httpPort,
-                                    blockSize = blockSize,
-                                    password = password
-                                )
-                                val isSuccess = (code == 0)
-                                val errorMsg = when (code) {
-                                    -1 -> "Tham số không hợp lệ"
-                                    -2 -> "Không tìm thấy/không đọc được file"
-                                    -3 -> "Tính mã băm (hash) thất bại"
-                                    -4 -> "Đăng ký tải lên qua HTTP thất bại"
-                                    -5 -> "Không phân giải được địa chỉ IP/UDP"
-                                    -6 -> "Lỗi bind cổng UDP cục bộ"
-                                    -7 -> "Truyền tải UDP thất bại hoặc quá hạn (Timeout)"
-                                    -99 -> "Native FFI crash hoặc JNA lỗi"
-                                    else -> "Mã lỗi không xác định: $code"
-                                }
-                                val statusMsg = if (isSuccess) "Thành công (Mã 0)" else "Lỗi ($code): $errorMsg"
-                                
-                                val newItem = UploadHistoryItem(
-                                    fileName = File(filePath).name,
-                                    filePath = filePath,
-                                    fileSize = File(filePath).length(),
-                                    timestamp = System.currentTimeMillis(),
-                                    sha256 = fileHash,
-                                    isSuccess = isSuccess,
-                                    statusMsg = statusMsg
-                                )
-                                val updatedHistory = listOf(newItem) + uploadHistory
-                                uploadHistory = updatedHistory
-                                saveUploadHistory(context, updatedHistory)
+                UdpUploadApp(
+                    uploadHistory = uploadHistory,
+                    onClearHistory = {
+                        uploadHistory = emptyList()
+                        saveUploadHistory(context, emptyList())
+                    },
+                    onStartBackgroundUpload = { config, onStatusChange, onProgress, onFinished ->
+                        lifecycleScope.launch {
+                            try {
+                                ensureUploadNotificationPermission()
+                                onStatusChange("Đang khởi chạy tiến trình gửi nền…")
+                                val transferId = UploadForegroundService.start(applicationContext, config)
 
-                                if (code == 0) {
-                                    Log.i("MainActivity", "Upload completed successfully! File: $filePath, Hash ID: $fileHash")
-                                    onStatusChange("Thành công: Tải lên hoàn tất (Mã 0)!")
-                                } else {
-                                    Log.e("MainActivity", "Upload failed! Code: $code, File: $filePath, Hash ID: $fileHash")
-                                    onStatusChange("Lỗi ($code): $errorMsg")
-                                }
-                            }
-                        },
-                        onStartWorkManager = { filePath, ip, udpPort, httpPort, blockSize, password, onStatusChange ->
-                            CoroutineScope(Dispatchers.Main).launch {
-                                val fileHash = withContext(Dispatchers.IO) {
-                                    RustUploader.calculateHashId(filePath)
-                                }
-                                Log.i("MainActivity", "Enqueuing WorkManager upload: $filePath, Hash ID: $fileHash")
-
-                                val workRequest = OneTimeWorkRequestBuilder<UploadWorker>()
-                                    .setInputData(
-                                        workDataOf(
-                                            UploadWorker.KEY_FILE_PATH to filePath,
-                                            UploadWorker.KEY_SERVER_IP to ip,
-                                            UploadWorker.KEY_UDP_PORT to udpPort,
-                                            UploadWorker.KEY_HTTP_PORT to httpPort,
-                                            UploadWorker.KEY_BLOCK_SIZE to blockSize,
-                                            UploadWorker.KEY_PASSWORD to password
-                                        )
-                                    )
-                                    .build()
-                                
-                                WorkManager.getInstance(applicationContext).enqueue(workRequest)
-                                Toast.makeText(this@MainActivity, "Đã đẩy tác vụ tải lên vào WorkManager", Toast.LENGTH_SHORT).show()
-                                
-                                // Observe live status
-                                WorkManager.getInstance(applicationContext)
-                                    .getWorkInfoByIdLiveData(workRequest.id)
-                                    .observe(this@MainActivity) { workInfo ->
-                                        if (workInfo != null) {
-                                            val state = workInfo.state.name
-                                            val code = workInfo.outputData.getInt(UploadWorker.KEY_RESULT_CODE, -99)
-                                            val errMsg = workInfo.outputData.getString(UploadWorker.KEY_ERROR_MESSAGE) ?: ""
-                                            val returnedHash = workInfo.outputData.getString(UploadWorker.KEY_FILE_HASH) ?: fileHash
-                                            
-                                            if (workInfo.state.isFinished) {
-                                                val isSuccess = (code == 0)
-                                                val statusMsg = if (isSuccess) "WorkManager HOÀN THÀNH: Thành công (Mã 0)!" else "WorkManager THẤT BẠI: Mã $code - $errMsg"
-                                                
-                                                val newItem = UploadHistoryItem(
-                                                    fileName = File(filePath).name,
-                                                    filePath = filePath,
-                                                    fileSize = File(filePath).length(),
-                                                    timestamp = System.currentTimeMillis(),
-                                                    sha256 = returnedHash,
-                                                    isSuccess = isSuccess,
-                                                    statusMsg = statusMsg
-                                                )
-                                                
-                                                val alreadyExists = uploadHistory.any { 
-                                                    it.sha256 == newItem.sha256 && Math.abs(it.timestamp - newItem.timestamp) < 5000 
-                                                }
-                                                if (!alreadyExists) {
-                                                    val updatedHistory = listOf(newItem) + uploadHistory
-                                                    uploadHistory = updatedHistory
-                                                    saveUploadHistory(context, updatedHistory)
-                                                }
-
-                                                if (code == 0) {
-                                                    Log.i("MainActivity", "WorkManager upload completed successfully! File: $filePath, SHA-256: $returnedHash")
-                                                    onStatusChange("WorkManager HOÀN THÀNH: Thành công (Mã 0)!")
-                                                } else {
-                                                    Log.e("MainActivity", "WorkManager upload failed! Code: $code, Error: $errMsg, File: $filePath, SHA-256: $returnedHash")
-                                                    onStatusChange("WorkManager THẤT BẠI: Mã $code - $errMsg")
-                                                }
-                                            } else {
-                                                onStatusChange("WorkManager Trạng thái: $state...")
-                                            }
+                                val finalState = UploadServiceState.state
+                                    .filter { it.transferId == transferId }
+                                    .onEach { state ->
+                                        onStatusChange(state.statusText)
+                                        if (state.totalBytes > 0L) {
+                                            onProgress(state.progress)
                                         }
                                     }
+                                    .first { state -> !state.running && state.resultCode != null }
+
+                                onFinished(finalState.resultCode == 0)
+                            } catch (t: Throwable) {
+                                Log.e("MainActivity", "Foreground upload start failed", t)
+                                onStatusChange(t.message ?: "Không thể khởi chạy tiến trình gửi nền")
+                                onFinished(false)
                             }
                         }
-                    )
+                    }
+                )
+            }
+        }
+    }
+
+    private fun ensureUploadNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2107)
+        }
+    }
+}
+
+@Composable
+private fun UdpTransferTheme(content: @Composable () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val scheme = if (dark) {
+        darkColorScheme(
+            primary = Color(0xFFA6C8FF),
+            secondary = Color(0xFFB7CCBE),
+            background = Color(0xFF101418),
+            surface = Color(0xFF171C20),
+            surfaceVariant = Color(0xFF41484D),
+            error = Color(0xFFFFB4AB)
+        )
+    } else {
+        lightColorScheme(
+            primary = Color(0xFF245E91),
+            secondary = Color(0xFF466554),
+            background = Color(0xFFF7F9FC),
+            surface = Color(0xFFFFFFFF),
+            surfaceVariant = Color(0xFFDDE3EA),
+            error = Color(0xFFBA1A1A)
+        )
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UdpUploadApp(
+    uploadHistory: List<UploadHistoryItem>,
+    onClearHistory: () -> Unit,
+    onStartBackgroundUpload: (UploadConfig, (String) -> Unit, (UploadProgress) -> Unit, (Boolean) -> Unit) -> Unit
+) {
+    var section by rememberSaveable { mutableStateOf(AppSection.TRANSFER) }
+    val stateHolder = rememberSaveableStateHolder()
+
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("UDP File Transfer", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Gửi file nhanh tới server của bạn",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
+            )
+        },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = section == AppSection.TRANSFER,
+                    onClick = { section = AppSection.TRANSFER },
+                    icon = { Icon(Icons.Default.Send, contentDescription = null) },
+                    label = { Text("Gửi file") }
+                )
+                NavigationBarItem(
+                    selected = section == AppSection.HISTORY,
+                    onClick = { section = AppSection.HISTORY },
+                    icon = { Icon(Icons.Default.History, contentDescription = null) },
+                    label = { Text("Lịch sử") }
+                )
+            }
+        }
+    ) { innerPadding ->
+        stateHolder.SaveableStateProvider(section.name) {
+            when (section) {
+                AppSection.TRANSFER -> TransferScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    onStartBackgroundUpload = onStartBackgroundUpload
+                )
+
+                AppSection.HISTORY -> HistoryScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    uploadHistory = uploadHistory,
+                    onClearHistory = onClearHistory
+                )
             }
         }
     }
@@ -277,427 +371,795 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UdpUploadScreen(
-    uploadHistory: List<UploadHistoryItem>,
-    onClearHistory: () -> Unit,
-    onStartUpload: (String, String, Int, Int, Int, String?, (String) -> Unit) -> Unit,
-    onStartWorkManager: (String, String, Int, Int, Int, String?, (String) -> Unit) -> Unit
+private fun TransferScreen(
+    modifier: Modifier = Modifier,
+    onStartBackgroundUpload: (UploadConfig, (String) -> Unit, (UploadProgress) -> Unit, (Boolean) -> Unit) -> Unit
 ) {
-    val context = LocalContext.current
-    val sharedPreferences = remember {
-        context.getSharedPreferences("udp_transfer_prefs", Context.MODE_PRIVATE)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+
+    var filePath by rememberSaveable { mutableStateOf("") }
+    var fileName by rememberSaveable { mutableStateOf("") }
+    var fileSize by rememberSaveable { mutableStateOf(0L) }
+    var serverIp by rememberSaveable { mutableStateOf(prefs.getString("server_ip", "") ?: "") }
+    var udpPortStr by rememberSaveable { mutableStateOf(prefs.getString("udp_port", DEFAULT_UDP_PORT.toString()) ?: DEFAULT_UDP_PORT.toString()) }
+    var httpPortStr by rememberSaveable { mutableStateOf(prefs.getString("http_port", DEFAULT_HTTP_PORT.toString()) ?: DEFAULT_HTTP_PORT.toString()) }
+    var blockSizeStr by rememberSaveable { mutableStateOf(prefs.getString("block_size", DEFAULT_BLOCK_SIZE.toString()) ?: DEFAULT_BLOCK_SIZE.toString()) }
+    var password by rememberSaveable { mutableStateOf(prefs.getString("password", "") ?: "") }
+    var showAdvanced by rememberSaveable { mutableStateOf(false) }
+    var showDemoCreator by rememberSaveable { mutableStateOf(false) }
+    var demoFileName by rememberSaveable { mutableStateOf("demo_data.txt") }
+    var demoContent by rememberSaveable { mutableStateOf("Nội dung file thử nghiệm UDP.") }
+    var isPasswordVisible by rememberSaveable { mutableStateOf(false) }
+    var isPreparingFile by rememberSaveable { mutableStateOf(false) }
+    var isUploading by rememberSaveable { mutableStateOf(false) }
+    var statusText by rememberSaveable { mutableStateOf("Sẵn sàng. Chọn file để bắt đầu.") }
+    var statusTone by rememberSaveable { mutableStateOf(UploadStatusTone.IDLE) }
+    var progressBytes by rememberSaveable { mutableStateOf(0L) }
+    var progressTotal by rememberSaveable { mutableStateOf(0L) }
+    var progressBps by rememberSaveable { mutableStateOf(0L) }
+    var hasTransferProgress by rememberSaveable { mutableStateOf(false) }
+    var validationMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    val foregroundState by UploadServiceState.state.collectAsState()
+
+    LaunchedEffect(foregroundState.updatedAt) {
+        if (foregroundState.running) {
+            if (foregroundState.filePath.isNotBlank()) {
+                val activeFile = File(foregroundState.filePath)
+                filePath = foregroundState.filePath
+                fileName = foregroundState.fileName.ifBlank { activeFile.name }
+                fileSize = foregroundState.totalBytes.takeIf { it > 0L } ?: activeFile.length()
+            }
+            isUploading = true
+            statusText = foregroundState.statusText
+            statusTone = UploadStatusTone.RUNNING
+            if (foregroundState.totalBytes > 0L) {
+                progressBytes = foregroundState.bytesTransferred
+                progressTotal = foregroundState.totalBytes
+                progressBps = foregroundState.bytesPerSecond
+                hasTransferProgress = true
+            }
+        } else if (isUploading && foregroundState.filePath == filePath && foregroundState.resultCode != null) {
+            isUploading = false
+            statusText = foregroundState.statusText
+            statusTone = if (foregroundState.resultCode == 0) UploadStatusTone.SUCCESS else UploadStatusTone.ERROR
+            if (foregroundState.totalBytes > 0L) {
+                progressBytes = foregroundState.bytesTransferred
+                progressTotal = foregroundState.totalBytes
+                progressBps = 0L
+                hasTransferProgress = true
+            }
+        }
     }
-    
-    // States
-    var filePath by remember { mutableStateOf("") }
-    var fileName by remember { mutableStateOf("demo_data.bin") }
-    var demoContent by remember { mutableStateOf("Nội dung thử nghiệm của file demo truyền tải UDP.") }
-    var serverIp by remember { mutableStateOf(sharedPreferences.getString("server_ip", "") ?: "") }
-    var udpPortStr by remember { mutableStateOf(sharedPreferences.getString("udp_port", "5000") ?: "5000") }
-    var httpPortStr by remember { mutableStateOf(sharedPreferences.getString("http_port", "8080") ?: "8080") }
-    var blockSizeStr by remember { mutableStateOf(sharedPreferences.getString("block_size", "16384") ?: "16384") }
-    var password by remember { mutableStateOf(sharedPreferences.getString("password", "") ?: "") }
-    var statusText by remember { mutableStateOf("Chọn một file hoặc tạo file demo để bắt đầu.") }
 
-    val scrollState = rememberScrollState()
+    fun updateSelectedFile(file: File) {
+        filePath = file.absolutePath
+        fileName = file.name
+        fileSize = file.length()
+        statusText = "Đã chọn ${file.name}"
+        statusTone = UploadStatusTone.IDLE
+        validationMessage = null
+    }
 
-    // File Selector Contract
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
+        contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                val resolvedName = getFileNameFromUri(context, uri)
-                fileName = resolvedName
-                
-                // Copy selected file to cache to bypass Scoped Storage file path limitations
-                statusText = "Đang xử lý sao chép file..."
-                val cachedFile = copyUriToCache(context, uri, resolvedName)
-                if (cachedFile != null) {
-                    filePath = cachedFile.absolutePath
-                    statusText = "Đã chọn file: ${cachedFile.name} (${cachedFile.length()} bytes)"
-                } else {
-                    statusText = "Sao chép file chọn thất bại."
+                scope.launch {
+                    isPreparingFile = true
+                    statusText = "Đang chuẩn bị file…"
+                    statusTone = UploadStatusTone.RUNNING
+                    val resolvedName = getFileNameFromUri(context, uri)
+                    val cachedFile = withContext(Dispatchers.IO) {
+                        copyUriToPendingUpload(context, uri, resolvedName)
+                    }
+                    isPreparingFile = false
+                    if (cachedFile != null) {
+                        updateSelectedFile(cachedFile)
+                    } else {
+                        statusText = "Không thể đọc file đã chọn"
+                        statusTone = UploadStatusTone.ERROR
+                    }
                 }
             }
         }
     )
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(scrollState),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    fun validateAndBuildConfig(): UploadConfig? {
+        val selectedFile = File(filePath)
+        val udpPort = udpPortStr.toIntOrNull()
+        val httpPort = httpPortStr.toIntOrNull()
+        val blockSize = blockSizeStr.toIntOrNull()
+
+        val error = when {
+            filePath.isBlank() || !selectedFile.exists() -> "Hãy chọn file cần gửi"
+            serverIp.trim().isBlank() -> "Hãy nhập địa chỉ IP hoặc hostname của server"
+            udpPort == null || udpPort !in 1..65535 -> "Cổng UDP phải nằm trong khoảng 1–65535"
+            httpPort == null || httpPort !in 1..65535 -> "Cổng HTTP phải nằm trong khoảng 1–65535"
+            blockSize == null || blockSize !in 512..1_048_576 -> "Block size nên nằm trong khoảng 512 B–1 MB"
+            else -> null
+        }
+
+        validationMessage = error
+        if (error != null) return null
+
+        return UploadConfig(
+            filePath = filePath,
+            serverIp = serverIp.trim(),
+            udpPort = udpPort!!,
+            httpPort = httpPort!!,
+            blockSize = blockSize!!,
+            password = password.takeIf { it.isNotBlank() }
+        )
+    }
+
+    fun startUpload() {
+        val config = validateAndBuildConfig() ?: return
+        prefs.edit()
+            .putString("server_ip", config.serverIp)
+            .putString("udp_port", config.udpPort.toString())
+            .putString("http_port", config.httpPort.toString())
+            .putString("block_size", config.blockSize.toString())
+            .putString("password", password)
+            .apply()
+
+        isUploading = true
+        statusTone = UploadStatusTone.RUNNING
+        validationMessage = null
+        progressBytes = 0L
+        progressTotal = fileSize
+        progressBps = 0L
+        hasTransferProgress = false
+
+        val statusCallback: (String) -> Unit = { message ->
+            statusText = message
+        }
+        val progressCallback: (UploadProgress) -> Unit = { progress ->
+            progressBytes = progress.bytesTransferred
+            progressTotal = progress.totalBytes
+            progressBps = progress.bytesPerSecond
+            hasTransferProgress = progress.totalBytes > 0L
+        }
+        val finishedCallback: (Boolean) -> Unit = { success ->
+            isUploading = false
+            statusTone = if (success) UploadStatusTone.SUCCESS else UploadStatusTone.ERROR
+        }
+
+        onStartBackgroundUpload(config, statusCallback, progressCallback, finishedCallback)
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Status Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = "Trạng thái:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Gray
-                )
-                Text(
-                    text = statusText,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-        }
-
-        // Section: File Source Selection
-        Text(
-            text = "1. NGUỒN FILE TRUYỀN TẢI",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.Start),
-            color = MaterialTheme.colorScheme.secondary
-        )
-
-        // Text Field for File Name (Editable)
-        OutlinedTextField(
-            value = fileName,
-            onValueChange = { fileName = it },
-            label = { Text("Tên File trước khi lưu & upload") },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                unfocusedBorderColor = Color.Gray
-            )
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Button to choose file from SD Card / Storage
-            Button(
-                onClick = { filePickerLauncher.launch("*/*") },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Text("Chọn File SDCard")
-            }
-        }
-
-        // Text Field for Custom Demo Content
-        OutlinedTextField(
-            value = demoContent,
-            onValueChange = { demoContent = it },
-            label = { Text("Nội dung file demo tự tạo") },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                unfocusedBorderColor = Color.Gray
-            )
-        )
-
-        // Button to generate file from demo content
-        Button(
-            onClick = {
-                if (fileName.isEmpty()) {
-                    Toast.makeText(context, "Vui lòng nhập tên file", Toast.LENGTH_SHORT).show()
+        item {
+            StatusCard(
+                statusText = statusText,
+                tone = statusTone,
+                showProgress = isUploading || isPreparingFile || (hasTransferProgress && statusTone == UploadStatusTone.SUCCESS),
+                progress = if (hasTransferProgress) {
+                    UploadProgress(progressBytes, progressTotal, progressBps)
                 } else {
-                    val demoFile = File(context.cacheDir, fileName)
-                    try {
-                        FileOutputStream(demoFile).use { fos ->
-                            fos.write(demoContent.toByteArray(Charsets.UTF_8))
+                    null
+                }
+            )
+        }
+
+        item {
+            SectionTitle(
+                title = "File cần gửi",
+                description = "Chọn file từ thiết bị. Ứng dụng sẽ chuẩn bị một bản tạm an toàn để truyền."
+            )
+        }
+
+        item {
+            FilePickerCard(
+                fileName = fileName,
+                filePath = filePath,
+                fileSize = fileSize,
+                enabled = !isUploading && !isPreparingFile,
+                onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) }
+            )
+        }
+
+        item {
+            TextButton(
+                onClick = { showDemoCreator = !showDemoCreator },
+                enabled = !isUploading,
+                contentPadding = PaddingValues(horizontal = 4.dp)
+            ) {
+                Icon(
+                    imageVector = if (showDemoCreator) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.size(6.dp))
+                Text(if (showDemoCreator) "Ẩn công cụ tạo file thử" else "Tạo nhanh một file thử")
+            }
+        }
+
+        item {
+            AnimatedVisibility(visible = showDemoCreator) {
+                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = demoFileName,
+                            onValueChange = { demoFileName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Tên file thử") },
+                            singleLine = true,
+                            enabled = !isUploading
+                        )
+                        OutlinedTextField(
+                            value = demoContent,
+                            onValueChange = { demoContent = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Nội dung") },
+                            minLines = 3,
+                            enabled = !isUploading
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                val safeName = demoFileName.trim().ifBlank { "demo_data.txt" }.replace('/', '_').replace('\\', '_')
+                                try {
+                                    val demoFile = File(context.cacheDir, safeName)
+                                    FileOutputStream(demoFile).use { output ->
+                                        output.write(demoContent.toByteArray(Charsets.UTF_8))
+                                    }
+                                    updateSelectedFile(demoFile)
+                                } catch (e: Exception) {
+                                    statusText = "Không thể tạo file thử: ${e.message ?: "lỗi không xác định"}"
+                                    statusTone = UploadStatusTone.ERROR
+                                }
+                            },
+                            enabled = !isUploading
+                        ) {
+                            Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text("Tạo và chọn file này")
                         }
-                        filePath = demoFile.absolutePath
-                        statusText = "Đã tạo file demo thành công: ${demoFile.name} (${demoFile.length()} bytes)"
-                    } catch (e: Exception) {
-                        statusText = "Tạo file demo lỗi: ${e.message}"
                     }
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2C2C))
-        ) {
-            Text("Tạo File Demo từ Nội dung trên", color = MaterialTheme.colorScheme.secondary)
+            }
         }
 
-        // File Path Info (read-only)
-        OutlinedTextField(
-            value = filePath,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Đường dẫn File được chọn để Upload") },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color.DarkGray,
-                unfocusedBorderColor = Color.DarkGray
+        item {
+            SectionTitle(
+                title = "Server",
+                description = "Nhập địa chỉ máy đang chạy UDP File Transfer Server."
             )
-        )
+        }
 
-        // Section: Network Configurations
+        item {
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = serverIp,
+                        onValueChange = {
+                            serverIp = it
+                            validationMessage = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("IP / hostname server") },
+                        placeholder = { Text("Ví dụ: 192.168.1.100") },
+                        singleLine = true,
+                        enabled = !isUploading,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+                    )
+
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Mật khẩu server (nếu có)") },
+                        singleLine = true,
+                        enabled = !isUploading,
+                        visualTransformation = if (isPasswordVisible) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                        trailingIcon = {
+                            IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                Icon(
+                                    imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (isPasswordVisible) "Ẩn mật khẩu" else "Hiện mật khẩu"
+                                )
+                            }
+                        }
+                    )
+
+                    Divider()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Tiếp tục gửi khi chuyển ứng dụng", fontWeight = FontWeight.Medium)
+                            Text(
+                                "Luôn bật. Tiến trình tiếp tục trong Foreground Service và hiển thị trên thông báo hệ thống.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            TextButton(
+                onClick = { showAdvanced = !showAdvanced },
+                enabled = !isUploading,
+                contentPadding = PaddingValues(horizontal = 4.dp)
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.size(6.dp))
+                Text(if (showAdvanced) "Ẩn cài đặt nâng cao" else "Cài đặt nâng cao")
+                Spacer(modifier = Modifier.size(4.dp))
+                Icon(
+                    imageVector = if (showAdvanced) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        item {
+            AnimatedVisibility(visible = showAdvanced) {
+                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = udpPortStr,
+                                onValueChange = { udpPortStr = it.filter(Char::isDigit) },
+                                label = { Text("UDP port") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                enabled = !isUploading,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                            OutlinedTextField(
+                                value = httpPortStr,
+                                onValueChange = { httpPortStr = it.filter(Char::isDigit) },
+                                label = { Text("HTTP port") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                enabled = !isUploading,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                        }
+                        OutlinedTextField(
+                            value = blockSizeStr,
+                            onValueChange = { blockSizeStr = it.filter(Char::isDigit) },
+                            label = { Text("Block size (bytes)") },
+                            supportingText = { Text("Mặc định: $DEFAULT_BLOCK_SIZE bytes") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isUploading,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                udpPortStr = DEFAULT_UDP_PORT.toString()
+                                httpPortStr = DEFAULT_HTTP_PORT.toString()
+                                blockSizeStr = DEFAULT_BLOCK_SIZE.toString()
+                            },
+                            enabled = !isUploading
+                        ) {
+                            Text("Khôi phục mặc định")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (validationMessage != null) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Error, contentDescription = null)
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(validationMessage.orEmpty(), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+
+        item {
+            Button(
+                onClick = { startUpload() },
+                enabled = !isUploading && !isPreparingFile,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null)
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = if (isUploading) "ĐANG GỬI…" else "GỬI FILE",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        item {
+            Text(
+                text = "Chạy nền luôn bật · UDP ${udpPortStr.ifBlank { DEFAULT_UDP_PORT.toString() }} · HTTP ${httpPortStr.ifBlank { DEFAULT_HTTP_PORT.toString() }}",
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String, description: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
-            text = "2. CẤU HÌNH KẾT NỐI SERVER",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.Start),
-            color = MaterialTheme.colorScheme.secondary
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun StatusCard(
+    statusText: String,
+    tone: UploadStatusTone,
+    showProgress: Boolean,
+    progress: UploadProgress?
+) {
+    val (container, content, icon) = when (tone) {
+        UploadStatusTone.SUCCESS -> Triple(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+            Icons.Default.CheckCircle
         )
 
-        var isPasswordVisible by remember { mutableStateOf(false) }
-
-        OutlinedTextField(
-            value = serverIp,
-            onValueChange = { 
-                serverIp = it 
-                sharedPreferences.edit().putString("server_ip", it).apply()
-            },
-            label = { Text("Địa chỉ IP Server") },
-            placeholder = { Text("Ví dụ: 10.0.2.2 hoặc 192.168.1.100", color = Color.Gray) },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                unfocusedBorderColor = Color.Gray
-            )
+        UploadStatusTone.ERROR -> Triple(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            Icons.Default.Error
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = udpPortStr,
-                onValueChange = { 
-                    udpPortStr = it 
-                    sharedPreferences.edit().putString("udp_port", it).apply()
-                },
-                label = { Text("Cổng UDP") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                    unfocusedBorderColor = Color.Gray
-                )
-            )
+        UploadStatusTone.RUNNING -> Triple(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            Icons.Default.CloudUpload
+        )
 
-            OutlinedTextField(
-                value = httpPortStr,
-                onValueChange = { 
-                    httpPortStr = it 
-                    sharedPreferences.edit().putString("http_port", it).apply()
-                },
-                label = { Text("Cổng HTTP") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                    unfocusedBorderColor = Color.Gray
-                )
-            )
+        UploadStatusTone.IDLE -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Default.CloudUpload
+        )
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = container,
+        contentColor = content,
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(icon, contentDescription = null)
+                Spacer(modifier = Modifier.size(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Trạng thái", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Text(statusText, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            if (showProgress) {
+                if (progress != null) {
+                    LinearProgressIndicator(
+                        progress = progress.fraction,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "${progress.percent}%",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "${formatFileSize(progress.bytesTransferred)} / ${formatFileSize(progress.totalBytes)}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = formatTransferRate(progress.bytesPerSecond),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = formatEta(progress.etaSeconds),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
         }
+    }
+}
 
-        OutlinedTextField(
-            value = blockSizeStr,
-            onValueChange = { 
-                blockSizeStr = it 
-                sharedPreferences.edit().putString("block_size", it).apply()
-            },
-            label = { Text("Kích thước Block (bytes)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                unfocusedBorderColor = Color.Gray
-            )
-        )
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { 
-                password = it 
-                sharedPreferences.edit().putString("password", it).apply()
-            },
-            label = { Text("Mật khẩu (Tùy chọn)") },
-            visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                TextButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+@Composable
+private fun FilePickerCard(
+    fileName: String,
+    filePath: String,
+    fileSize: Long,
+    enabled: Boolean,
+    onPickFile: () -> Unit
+) {
+    val hasFile = filePath.isNotBlank()
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Box(modifier = Modifier.padding(10.dp)) {
+                        Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                    }
+                }
+                Spacer(modifier = Modifier.size(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isPasswordVisible) "Ẩn" else "Hiện",
-                        color = MaterialTheme.colorScheme.secondary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
+                        text = if (hasFile) fileName else "Chưa chọn file",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (hasFile) formatFileSize(fileSize) else "Ảnh, video, tài liệu hoặc file bất kỳ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                unfocusedBorderColor = Color.Gray
-            )
-        )
+            }
 
-        Spacer(modifier = Modifier.height(8.dp))
+            if (hasFile) {
+                Text(
+                    text = filePath,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
 
-        // Section: Action Buttons
-        Button(
-            onClick = {
-                if (filePath.isEmpty()) {
-                    Toast.makeText(context, "Vui lòng chọn hoặc tạo file trước", Toast.LENGTH_SHORT).show()
-                } else {
-                    val udp = udpPortStr.toIntOrNull() ?: 5000
-                    val http = httpPortStr.toIntOrNull() ?: 8080
-                    val size = blockSizeStr.toIntOrNull() ?: 16384
-                    val pwd = if (password.isEmpty()) null else password
-                    onStartUpload(filePath, serverIp, udp, http, size, pwd) { statusText = it }
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-        ) {
-            Text("BẮT ĐẦU TẢI LÊN (DIRECT UDP)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            OutlinedButton(
+                onClick = onPickFile,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Icon(Icons.Default.FolderOpen, contentDescription = null)
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(if (hasFile) "Đổi file" else "Chọn file")
+            }
         }
+    }
+}
 
-        Button(
-            onClick = {
-                if (filePath.isEmpty()) {
-                    Toast.makeText(context, "Vui lòng chọn hoặc tạo file trước", Toast.LENGTH_SHORT).show()
-                } else {
-                    val udp = udpPortStr.toIntOrNull() ?: 5000
-                    val http = httpPortStr.toIntOrNull() ?: 8080
-                    val size = blockSizeStr.toIntOrNull() ?: 16384
-                    val pwd = if (password.isEmpty()) null else password
-                    onStartWorkManager(filePath, serverIp, udp, http, size, pwd) { statusText = it }
+@Composable
+private fun HistoryScreen(
+    modifier: Modifier = Modifier,
+    uploadHistory: List<UploadHistoryItem>,
+    onClearHistory: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "Lịch sử truyền file",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "${uploadHistory.size} lần gần nhất",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-        ) {
-            Text("TẢI LÊN QUA WORKMANAGER", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "3. LỊCH SỬ TẢI LÊN (${uploadHistory.size})",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.secondary
-            )
-            if (uploadHistory.isNotEmpty()) {
-                TextButton(onClick = onClearHistory) {
-                    Text("Xóa lịch sử", color = Color.Red, fontSize = 12.sp)
+                if (uploadHistory.isNotEmpty()) {
+                    TextButton(onClick = onClearHistory) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.size(4.dp))
+                        Text("Xóa")
+                    }
                 }
             }
         }
 
         if (uploadHistory.isEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Chưa có file nào được tải lên", color = Color.Gray, fontSize = 14.sp)
+            item {
+                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 36.dp, horizontal = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text("Chưa có lịch sử truyền file", fontWeight = FontWeight.Medium)
+                        Text(
+                            "Các lần gửi thành công hoặc thất bại sẽ xuất hiện ở đây.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         } else {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+            items(uploadHistory, key = { "${it.timestamp}-${it.sha256}-${it.fileName}" }) { item ->
+                HistoryItemCard(
+                    item = item,
+                    onCopyHash = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Hash ID", item.sha256))
+                        Toast.makeText(context, "Đã sao chép Hash ID", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryItemCard(
+    item: UploadHistoryItem,
+    onCopyHash: () -> Unit
+) {
+    val statusColor = if (item.isSuccess) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.error
+    }
+
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                uploadHistory.forEach { item ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
-                        shape = RoundedCornerShape(8.dp)
+                Icon(
+                    imageVector = if (item.isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
+                    contentDescription = null,
+                    tint = statusColor
+                )
+                Spacer(modifier = Modifier.size(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        item.fileName,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "${formatFileSize(item.fileSize)} · ${formatTimestamp(item.timestamp)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Text(
+                item.statusMsg,
+                style = MaterialTheme.typography.bodySmall,
+                color = statusColor
+            )
+
+            if (item.sha256.isNotBlank()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = item.fileName,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = if (item.isSuccess) Color(0xFF81C784) else Color(0xFFE57373),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Text(
-                                    text = formatFileSize(item.fileSize),
-                                    fontSize = 12.sp,
-                                    color = Color.Gray
-                                )
-                            }
-
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Thời gian: ${formatTimestamp(item.timestamp)}",
-                                fontSize = 12.sp,
-                                color = Color.LightGray
+                                "Hash ID",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-
                             Text(
-                                text = "Trạng thái: ${item.statusMsg}",
-                                fontSize = 12.sp,
-                                color = if (item.isSuccess) Color(0xFF81C784) else Color(0xFFE57373)
+                                item.sha256,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0xFF2E2E2E), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Hash ID (Khớp Backend):",
-                                        fontSize = 10.sp,
-                                        color = Color.Gray
-                                    )
-                                    Text(
-                                        text = item.sha256,
-                                        fontSize = 11.sp,
-                                        color = Color.White,
-                                        fontFamily = FontFamily.Monospace,
-                                        maxLines = 1
-                                    )
-                                }
-                                TextButton(
-                                    onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val clip = ClipData.newPlainText("Hash ID", item.sha256)
-                                        clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Đã sao chép Hash ID!", Toast.LENGTH_SHORT).show()
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Text("SAO CHÉP", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
-                                }
-                            }
+                        }
+                        IconButton(onClick = onCopyHash) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Sao chép Hash ID")
                         }
                     }
                 }
@@ -706,7 +1168,6 @@ fun UdpUploadScreen(
     }
 }
 
-// Helper: Get original filename from URI
 fun getFileNameFromUri(context: Context, uri: Uri): String {
     var name = ""
     if (uri.scheme == "content") {
@@ -726,18 +1187,26 @@ fun getFileNameFromUri(context: Context, uri: Uri): String {
     return name
 }
 
-// Helper: Copy selected URI stream to a cache file
-fun copyUriToCache(context: Context, uri: Uri, targetFileName: String): File? {
+fun copyUriToPendingUpload(context: Context, uri: Uri, targetFileName: String): File? {
     return try {
-        val cacheFile = File(context.cacheDir, targetFileName)
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(cacheFile).use { output ->
-                input.copyTo(output)
+        val safeName = targetFileName.ifBlank { "file.bin" }.replace('/', '_').replace('\\', '_')
+        // Keep a private durable copy while the foreground service owns the transfer.
+        // Unlike cacheDir, filesDir is not automatically reclaimed under storage pressure.
+        val transferDir = File(
+            context.filesDir,
+            "pending_uploads/${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}"
+        )
+        if (!transferDir.mkdirs() && !transferDir.isDirectory) return null
+        val pendingFile = File(transferDir, safeName)
+        val input = context.contentResolver.openInputStream(uri) ?: return null
+        input.use { source ->
+            FileOutputStream(pendingFile).use { output ->
+                source.copyTo(output, bufferSize = 256 * 1024)
             }
         }
-        cacheFile
+        pendingFile
     } catch (e: Exception) {
-        e.printStackTrace()
+        Log.e("FilePicker", "Failed to prepare selected URI for background upload", e)
         null
     }
 }

@@ -24,8 +24,10 @@ Các script này tự động:
 
 Mã nguồn tích hợp FFI đã được viết sẵn tại:
 1. **[RustUploaderLib.kt](app/src/main/java/com/rustcore/RustUploaderLib.kt)**: Định nghĩa interface JNA để tải thư viện động và map các hàm Rust `rtk_upload_file`, đồng thời cung cấp helper `RustUploader` chạy bất tuần tự qua Kotlin Coroutines.
-2. **[UploadWorker.kt](app/src/main/java/com/rustcore/UploadWorker.kt)**: Triển khai Jetpack `WorkManager` giúp chạy tác vụ tải lên an toàn dưới dạng background worker mà không lo bị hệ điều hành tắt tiến trình.
-3. **[MainActivity.kt](app/src/main/java/com/rustcore/MainActivity.kt)**: Giao diện người dùng Dark Mode Compose cho phép chọn file từ bộ nhớ thiết bị, nhập cấu hình, viết nội dung file test demo và xem tiến trình upload live.
+2. **[UploadForegroundService.kt](app/src/main/java/com/filetransfersystem/UploadForegroundService.kt)**: Foreground Service loại `dataSync` sở hữu tiến trình upload, vì vậy việc chuyển sang ứng dụng khác không làm upload phụ thuộc vào `Activity`.
+3. **[UploadServiceState.kt](app/src/main/java/com/filetransfersystem/UploadServiceState.kt)**: Lưu và phát lại trạng thái upload để UI kết nối lại sau khi Activity được tạo lại.
+4. **[MainActivity.kt](app/src/main/java/com/filetransfersystem/MainActivity.kt)**: Giao diện Jetpack Compose Material 3: chọn file, cấu hình server, bắt đầu upload nền, theo dõi tiến độ và lịch sử.
+5. **[UploadWorker.kt](app/src/main/java/com/filetransfersystem/UploadWorker.kt)**: Giữ lại như implementation WorkManager/fallback cũ; luồng upload do người dùng bấm gửi hiện dùng Foreground Service trực tiếp.
 
 ---
 
@@ -44,12 +46,15 @@ dependencies {
 ```
 
 ### 3.2 Quyền Hạn (`app/src/main/AndroidManifest.xml`)
-Đảm bảo đã yêu cầu quyền kết nối mạng và đọc bộ nhớ thiết bị:
+File được chọn thông qua Android Storage Access Framework (`OpenDocument`), vì vậy không cần quyền đọc toàn bộ bộ nhớ. Để upload tiếp tục khi app bị thu nhỏ, app dùng Foreground Service `dataSync` và notification:
 ```xml
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 </manifest>
+```
 ```
 
 ---
@@ -70,7 +75,10 @@ lifecycleScope.launch {
         udpPort = 5000,
         httpPort = 8080,
         blockSize = 16384, // 16KB
-        password = "my_secure_password" // Đổi thành null nếu không dùng mật khẩu
+        password = "my_secure_password", // Đổi thành null nếu không dùng mật khẩu
+        onProgress = { progress ->
+            println("${progress.percent}% - ${progress.bytesPerSecond} B/s - ETA ${progress.etaSeconds}s")
+        }
     )
     
     if (result == 0) {
@@ -81,29 +89,13 @@ lifecycleScope.launch {
 }
 ```
 
-### Cách B: Gọi bằng WorkManager (Khuyên Dùng cho File Lớn)
-Sử dụng `UploadWorker` đã tạo sẵn để đảm bảo tiến trình truyền tải không bị hệ điều hành Android kill:
+### Cách B: Upload nền giống ứng dụng cloud drive (mặc định của app)
 
-```kotlin
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.workDataOf
-import com.filetransfersystem.UploadWorker
+`MainActivity` gọi `UploadForegroundService.start(...)` ngay khi người dùng bấm **GỬI FILE**. Service hiển thị notification tiến độ và tiếp tục chạy khi Activity bị đưa xuống background. Xem [BACKGROUND_UPLOAD.md](BACKGROUND_UPLOAD.md) để biết luồng lifecycle, resume và cách kiểm thử.
 
-fun startBackgroundUpload(context: Context, filePath: String, serverIp: String) {
-    val uploadWorkRequest = OneTimeWorkRequestBuilder<UploadWorker>()
-        .setInputData(
-            workDataOf(
-                UploadWorker.KEY_FILE_PATH to filePath,
-                UploadWorker.KEY_SERVER_IP to serverIp,
-                UploadWorker.KEY_UDP_PORT to 5000,
-                UploadWorker.KEY_HTTP_PORT to 8080,
-                UploadWorker.KEY_BLOCK_SIZE to 16384,
-                UploadWorker.KEY_PASSWORD to "optional_password"
-            )
-        )
-        .build()
 
-    WorkManager.getInstance(context).enqueue(uploadWorkRequest)
-}
-```
+---
+
+## 5. Tiến độ truyền thực tế
+
+Bản này nhận progress từ ACK thực tế của server và hiển thị phần trăm, dung lượng đã truyền, tốc độ và ETA. Xem `PROGRESS.md` để biết chi tiết luồng callback Rust → JNA → Compose/WorkManager.

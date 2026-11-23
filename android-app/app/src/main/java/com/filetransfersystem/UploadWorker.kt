@@ -5,6 +5,9 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -17,7 +20,7 @@ class UploadWorker(
 
     companion object {
         const val TAG = "UploadWorker"
-        
+
         // Input Keys
         const val KEY_FILE_PATH = "file_path"
         const val KEY_SERVER_IP = "server_ip"
@@ -30,9 +33,12 @@ class UploadWorker(
         const val KEY_RESULT_CODE = "result_code"
         const val KEY_ERROR_MESSAGE = "error_message"
         const val KEY_FILE_HASH = "file_hash"
+        const val KEY_PROGRESS_BYTES = "progress_bytes"
+        const val KEY_PROGRESS_TOTAL = "progress_total"
+        const val KEY_PROGRESS_BPS = "progress_bps"
     }
 
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = coroutineScope {
         val filePath = inputData.getString(KEY_FILE_PATH)
         val serverIp = inputData.getString(KEY_SERVER_IP)
         val udpPort = inputData.getInt(KEY_UDP_PORT, 5000)
@@ -42,7 +48,7 @@ class UploadWorker(
 
         if (filePath.isNullOrEmpty() || serverIp.isNullOrEmpty()) {
             Log.e(TAG, "Missing required parameters: file_path or server_ip")
-            return Result.failure(
+            return@coroutineScope Result.failure(
                 workDataOf(
                     KEY_RESULT_CODE to -1,
                     KEY_ERROR_MESSAGE to "Missing required parameters"
@@ -50,12 +56,11 @@ class UploadWorker(
             )
         }
 
-        // Try loading the native library inside the worker process
         try {
             System.loadLibrary("client_lib")
         } catch (e: UnsatisfiedLinkError) {
             Log.e(TAG, "UnsatisfiedLinkError loading client_lib inside Worker: ${e.message}")
-            return Result.failure(
+            return@coroutineScope Result.failure(
                 workDataOf(
                     KEY_RESULT_CODE to -98,
                     KEY_ERROR_MESSAGE to "UnsatisfiedLinkError: ${e.message}"
@@ -66,7 +71,7 @@ class UploadWorker(
         val file = File(filePath)
         if (!file.exists() || !file.canRead()) {
             Log.e(TAG, "File does not exist or cannot be read: $filePath")
-            return Result.failure(
+            return@coroutineScope Result.failure(
                 workDataOf(
                     KEY_RESULT_CODE to -2,
                     KEY_ERROR_MESSAGE to "File does not exist or is not readable"
@@ -74,22 +79,51 @@ class UploadWorker(
             )
         }
 
-        val fileHash = RustUploader.calculateSHA256(filePath)
         val hashId = RustUploader.calculateHashId(filePath)
-        Log.i(TAG, "Starting UDP file upload: ${file.name} (${file.length()} bytes) to $serverIp:$udpPort. Hash ID: $hashId, SHA-256: $fileHash")
-        
+        Log.i(
+            TAG,
+            "Starting UDP file upload: ${file.name} (${file.length()} bytes) to $serverIp:$udpPort. Hash ID: $hashId"
+        )
+
+        setProgress(
+            workDataOf(
+                KEY_PROGRESS_BYTES to 0L,
+                KEY_PROGRESS_TOTAL to file.length(),
+                KEY_PROGRESS_BPS to 0L
+            )
+        )
+
+        // The Rust callback is synchronous and may arrive on a native IO thread.
+        // A conflated channel keeps only the newest sample so WorkManager database writes
+        // cannot slow down the UDP sender.
+        val progressChannel = Channel<UploadProgress>(capacity = Channel.CONFLATED)
+        val progressJob = launch {
+            for (progress in progressChannel) {
+                setProgress(
+                    workDataOf(
+                        KEY_PROGRESS_BYTES to progress.bytesTransferred,
+                        KEY_PROGRESS_TOTAL to progress.totalBytes,
+                        KEY_PROGRESS_BPS to progress.bytesPerSecond
+                    )
+                )
+            }
+        }
+
         try {
-            // Call the Rust library wrapper
             val resultCode = RustUploader.performUpload(
                 filePath = filePath,
                 serverIp = serverIp,
                 udpPort = udpPort,
                 httpPort = httpPort,
                 blockSize = blockSize,
-                password = password
+                password = password,
+                onProgress = { progress -> progressChannel.trySend(progress) }
             )
 
-            return if (resultCode == 0) {
+            progressChannel.close()
+            progressJob.join()
+
+            return@coroutineScope if (resultCode == 0) {
                 Log.i(TAG, "Upload completed successfully! File: ${file.name}, Hash ID: $hashId")
                 Result.success(
                     workDataOf(
@@ -106,10 +140,14 @@ class UploadWorker(
                     -5 -> "Rust library: Server address resolution failed"
                     -6 -> "Rust library: Local UDP socket binding failed"
                     -7 -> "Rust library: UDP transfer connection/transmission timed out"
+                    -98 -> "Rust library: progress-enabled native symbol is missing"
                     -99 -> "Rust library: Native library call crashed"
                     else -> "Unknown error code: $resultCode"
                 }
-                Log.e(TAG, "Upload failed: $errorMsg (code: $resultCode). File: ${file.name}, Hash ID: $hashId")
+                Log.e(
+                    TAG,
+                    "Upload failed: $errorMsg (code: $resultCode). File: ${file.name}, Hash ID: $hashId"
+                )
                 Result.failure(
                     workDataOf(
                         KEY_RESULT_CODE to resultCode,
@@ -119,8 +157,14 @@ class UploadWorker(
                 )
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "Unexpected error executing Rust FFI upload in Worker for file: ${file.name}, Hash ID: $hashId", e)
-            return Result.failure(
+            progressChannel.close()
+            progressJob.join()
+            Log.e(
+                TAG,
+                "Unexpected error executing Rust FFI upload in Worker for file: ${file.name}, Hash ID: $hashId",
+                e
+            )
+            return@coroutineScope Result.failure(
                 workDataOf(
                     KEY_RESULT_CODE to -97,
                     KEY_ERROR_MESSAGE to "FFI exception: ${e.message}",

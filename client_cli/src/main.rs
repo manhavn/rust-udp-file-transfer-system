@@ -1,10 +1,11 @@
 use clap::Parser;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::Path;
 use tokio::net::UdpSocket;
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration, Instant};
 
 #[derive(Parser, Debug)]
 #[command(name = "rtk-client")]
@@ -30,6 +31,10 @@ struct Args {
     #[arg(short, long, env = "BLOCK_SIZE", default_value_t = 16384)]
     block_size: usize,
 
+    /// Số gói UDP được phép đang chờ ACK đồng thời
+    #[arg(long, env = "WINDOW_SIZE", default_value_t = 32)]
+    window_size: usize,
+
     /// Hiển thị tiến trình upload dạng log dòng mới
     #[arg(long, env = "LOG_PROGRESS", default_value_t = false)]
     log_progress: bool,
@@ -39,72 +44,151 @@ struct Args {
     password: Option<String>,
 }
 
-async fn send_chunk_with_retry(
+const MAX_RETRIES: usize = 30;
+const ACK_TIMEOUT: Duration = Duration::from_millis(150);
+
+#[derive(Debug)]
+struct InFlightChunk {
+    packet: Vec<u8>,
+    expected_len: u64,
+    last_sent: Instant,
+    retries: usize,
+}
+
+async fn send_windowed_file(
     socket: &UdpSocket,
     server_addr: SocketAddr,
-    status: u8,
+    file: &mut File,
     packet_code: &[u8],
-    seek_begin: u64,
-    data: &[u8],
+    start_offset: u64,
+    file_size: u64,
+    block_size: usize,
+    window_size: usize,
+    log_progress: bool,
 ) -> Result<(), String> {
-    let pkt_bytes = common::UdpPacket::serialize(status, packet_code, seek_begin, data);
-    let mut retry_count = 0;
-    const MAX_RETRIES: usize = 30;
-    const TIMEOUT_DUR: Duration = Duration::from_millis(150);
+    let mut next_offset = start_offset;
+    let mut acked_bytes = start_offset;
+    let mut in_flight: BTreeMap<u64, InFlightChunk> = BTreeMap::new();
+    let mut read_buf = vec![0u8; block_size];
+    let mut ack_buf = [0u8; 1024];
 
-    let expected_bytes_received = if status == 0 { 0 } else { data.len() as u64 };
+    file.seek(SeekFrom::Start(start_offset))
+        .map_err(|e| format!("Seek thất bại: {}", e))?;
 
-    loop {
-        // Send packet
-        if let Err(e) = socket.send_to(&pkt_bytes, server_addr).await {
-            eprintln!("[Cảnh báo] Gửi gói tin thất bại: {}", e);
+    while next_offset < file_size || !in_flight.is_empty() {
+        while next_offset < file_size && in_flight.len() < window_size {
+            let to_read = ((file_size - next_offset) as usize).min(block_size);
+            let n = file
+                .read(&mut read_buf[..to_read])
+                .map_err(|e| format!("Đọc file thất bại: {}", e))?;
+            if n == 0 {
+                break;
+            }
+            let packet = common::UdpPacket::serialize(1, packet_code, next_offset, &read_buf[..n]);
+            socket
+                .send_to(&packet, server_addr)
+                .await
+                .map_err(|e| format!("Gửi UDP thất bại: {}", e))?;
+            in_flight.insert(
+                next_offset,
+                InFlightChunk {
+                    packet,
+                    expected_len: n as u64,
+                    last_sent: Instant::now(),
+                    retries: 0,
+                },
+            );
+            next_offset += n as u64;
         }
 
-        // Wait for ACK
-        let mut ack_buf = vec![0u8; 1024];
-        match timeout(TIMEOUT_DUR, socket.recv_from(&mut ack_buf)).await {
-            Ok(Ok((len, _src))) => {
-                match common::AckPacket::parse(&ack_buf[..len]) {
-                    Ok(ack) => {
-                        if ack.packet_code == packet_code
-                            && ack.seek_begin == seek_begin
-                            && ack.bytes_received == expected_bytes_received
-                        {
-                            // Success
-                            return Ok(());
-                        } else {
-                            eprintln!(
-                                "[Cảnh báo] Nhận sai ACK (Khớp mã: {}, Seek: {} vs {}, Nhận: {} vs {}). Đang thử lại...",
-                                ack.packet_code == packet_code,
-                                ack.seek_begin, seek_begin,
-                                ack.bytes_received, expected_bytes_received
-                            );
+        match timeout(Duration::from_millis(10), socket.recv_from(&mut ack_buf)).await {
+            Ok(Ok((len, src))) if src == server_addr => {
+                if let Ok(ack) = common::AckPacket::parse(&ack_buf[..len]) {
+                    if ack.packet_code == packet_code {
+                        if let Some(chunk) = in_flight.get(&ack.seek_begin) {
+                            if ack.bytes_received == chunk.expected_len {
+                                in_flight.remove(&ack.seek_begin);
+                                acked_bytes = next_offset.saturating_sub(
+                                    in_flight.values().map(|c| c.expected_len).sum::<u64>(),
+                                );
+                                if log_progress {
+                                    println!(
+                                        "   -> Đã ACK: {} / {}",
+                                        acked_bytes.min(file_size),
+                                        file_size
+                                    );
+                                } else if file_size > 0 {
+                                    let percent = acked_bytes.min(file_size) as f64
+                                        / file_size as f64
+                                        * 100.0;
+                                    print!(
+                                        "\r   -> Đang tải lên: {}/{} bytes ({:.2}%)",
+                                        acked_bytes.min(file_size),
+                                        file_size,
+                                        percent
+                                    );
+                                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                                }
+                            }
                         }
-                    }
-                    Err(e) => {
-                        eprintln!("[Cảnh báo] Lỗi phân tích ACK: {}. Đang thử lại...", e);
                     }
                 }
             }
-            Ok(Err(e)) => {
-                eprintln!("[Cảnh báo] Lỗi socket nhận: {}. Đang thử lại...", e);
-            }
-            Err(_) => {
-                // Timeout, silently retry
-            }
+            Ok(Err(e)) => return Err(format!("Lỗi socket nhận ACK: {}", e)),
+            _ => {}
         }
 
-        retry_count += 1;
-        if retry_count > MAX_RETRIES {
-            return Err(format!(
-                "Thất bại khi truyền gói tin tại offset {} sau {} lần thử lại.",
-                seek_begin, MAX_RETRIES
-            ));
+        let now = Instant::now();
+        for (&offset, chunk) in in_flight.iter_mut() {
+            if now.duration_since(chunk.last_sent) >= ACK_TIMEOUT {
+                if chunk.retries >= MAX_RETRIES {
+                    return Err(format!(
+                        "Thất bại tại offset {} sau {} lần gửi lại",
+                        offset, MAX_RETRIES
+                    ));
+                }
+                socket
+                    .send_to(&chunk.packet, server_addr)
+                    .await
+                    .map_err(|e| format!("Gửi lại UDP thất bại: {}", e))?;
+                chunk.retries += 1;
+                chunk.last_sent = Instant::now();
+            }
         }
-
-        // Backoff delay
-        tokio::time::sleep(Duration::from_millis(5 * (retry_count as u64).min(10))).await;
     }
+    if !log_progress {
+        println!();
+    }
+    Ok(())
+}
+
+async fn send_end_with_retry(
+    socket: &UdpSocket,
+    server_addr: SocketAddr,
+    packet_code: &[u8],
+    file_size: u64,
+) -> Result<(), String> {
+    let packet = common::UdpPacket::serialize(0, packet_code, file_size, &[]);
+    let mut ack_buf = [0u8; 1024];
+    for _ in 0..=MAX_RETRIES {
+        socket
+            .send_to(&packet, server_addr)
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Ok(Ok((len, src))) = timeout(ACK_TIMEOUT, socket.recv_from(&mut ack_buf)).await {
+            if src == server_addr {
+                if let Ok(ack) = common::AckPacket::parse(&ack_buf[..len]) {
+                    if ack.packet_code == packet_code
+                        && ack.seek_begin == file_size
+                        && ack.bytes_received == 0
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+    Err("Không nhận được ACK kết thúc".to_string())
 }
 
 #[tokio::main]
@@ -178,6 +262,9 @@ async fn main() -> Result<(), String> {
                             // Align down to block size to ensure any partially written block is completely overwritten
                             let block_size = args.block_size as u64;
                             let aligned_offset = (offset / block_size) * block_size;
+                            // bytes_received is a high-water mark; with windowed/out-of-order UDP, rewind one full window to fill possible holes after an interrupted upload.
+                            let aligned_offset = aligned_offset
+                                .saturating_sub((args.window_size.max(1) as u64) * block_size);
                             if aligned_offset > 0 {
                                 println!("   -> Phát hiện tệp tải lên dang dở. Sẽ tiếp tục truyền từ byte thứ {} (làm tròn từ {}, {:.2}%)", aligned_offset, offset, (aligned_offset as f64 / file_size as f64) * 100.0);
                                 seek_begin = aligned_offset;
@@ -210,61 +297,25 @@ async fn main() -> Result<(), String> {
         .await
         .map_err(|e| format!("Không thể bind cổng UDP local: {}", e))?;
 
-    println!("3. Bắt đầu truyền dữ liệu qua UDP...");
-    let mut buffer = vec![0u8; args.block_size];
-
-    while seek_begin < file_size {
-        file.seek(SeekFrom::Start(seek_begin))
-            .map_err(|e| format!("Seek thất bại: {}", e))?;
-        let bytes_read = file
-            .read(&mut buffer)
-            .map_err(|e| format!("Đọc file thất bại: {}", e))?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        if args.log_progress {
-            println!("   -> Đang tải lên: {} / {}", seek_begin, file_size);
-        } else {
-            let percent = (seek_begin + bytes_read as u64) as f64 / file_size as f64 * 100.0;
-            print!(
-                "\r   -> Đang tải lên: {}/{} bytes ({:.2}%)",
-                seek_begin + bytes_read as u64,
-                file_size,
-                percent
-            );
-            std::io::Write::flush(&mut std::io::stdout()).unwrap();
-        }
-
-        send_chunk_with_retry(
-            &udp_socket,
-            server_udp_addr,
-            1, // Trạng thái 1: Đang gửi
-            &packet_code_bytes,
-            seek_begin,
-            &buffer[..bytes_read],
-        )
-        .await?;
-
-        seek_begin += bytes_read as u64;
-    }
-    if args.log_progress {
-        println!("   -> Đang tải lên: {} / {}", file_size, file_size);
-    } else {
-        println!();
-    }
-
-    // 4. Send end packet
-    println!("4. Gửi tín hiệu hoàn thành (Trạng thái kết thúc)...");
-    send_chunk_with_retry(
+    println!(
+        "3. Bắt đầu truyền dữ liệu qua UDP (window = {})...",
+        args.window_size.max(1)
+    );
+    send_windowed_file(
         &udp_socket,
         server_udp_addr,
-        0, // Trạng thái kết thúc: 0
+        &mut file,
         &packet_code_bytes,
-        file_size, // seek begin khớp với độ dài file
-        &[],       // không có dữ liệu
+        seek_begin,
+        file_size,
+        args.block_size,
+        args.window_size.max(1),
+        args.log_progress,
     )
     .await?;
+
+    println!("4. Gửi tín hiệu hoàn thành (Trạng thái kết thúc)...");
+    send_end_with_retry(&udp_socket, server_udp_addr, &packet_code_bytes, file_size).await?;
 
     println!(
         "🎉 Tải file lên thành công! Mã Hash ID: {}",

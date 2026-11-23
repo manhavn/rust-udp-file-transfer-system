@@ -1,6 +1,7 @@
 package com.filetransfersystem
 
 import android.util.Log
+import com.sun.jna.Callback
 import com.sun.jna.Library
 import com.sun.jna.Native
 import kotlinx.coroutines.Dispatchers
@@ -8,6 +9,39 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import kotlin.math.ceil
+
+/**
+ * Progress reported by the Rust uploader from server-confirmed ACKs.
+ */
+data class UploadProgress(
+    val bytesTransferred: Long,
+    val totalBytes: Long,
+    val bytesPerSecond: Long
+) {
+    val fraction: Float
+        get() = if (totalBytes <= 0L) 0f else
+            (bytesTransferred.toDouble() / totalBytes.toDouble()).coerceIn(0.0, 1.0).toFloat()
+
+    val percent: Int
+        get() = (fraction * 100f).toInt().coerceIn(0, 100)
+
+    val etaSeconds: Long?
+        get() {
+            if (bytesPerSecond <= 0L || totalBytes <= bytesTransferred) {
+                return if (totalBytes > 0L && bytesTransferred >= totalBytes) 0L else null
+            }
+            return ceil((totalBytes - bytesTransferred).toDouble() / bytesPerSecond.toDouble()).toLong()
+        }
+}
+
+/**
+ * JNA callback implemented by Kotlin and invoked by Rust.
+ * Values are based on bytes ACKed by the server, not raw socket writes.
+ */
+interface UploadProgressCallback : Callback {
+    fun invoke(bytesTransferred: Long, totalBytes: Long, bytesPerSecond: Long)
+}
 
 /**
  * JNA Interface mapping the Rust client_lib C-FFI functions.
@@ -30,6 +64,16 @@ interface RustUploaderLib : Library {
         password: String?
     ): Int
 
+    fun rtk_upload_file_with_password_and_progress(
+        filePath: String,
+        serverIp: String,
+        udpPort: Short,
+        httpPort: Short,
+        blockSize: Long,
+        password: String?,
+        progressCallback: UploadProgressCallback?
+    ): Int
+
     fun rtk_calculate_hash_id(
         filePath: String,
         outBuf: ByteArray,
@@ -38,7 +82,7 @@ interface RustUploaderLib : Library {
 
     companion object {
         private const val TAG = "RustUploaderLib"
-        
+
         init {
             try {
                 Log.i(TAG, "Attempting to load client_lib native library via System.loadLibrary")
@@ -48,7 +92,7 @@ interface RustUploaderLib : Library {
                 Log.e(TAG, "Failed to load native library client_lib via System.loadLibrary: ${e.message}")
             }
         }
-        
+
         val INSTANCE: RustUploaderLib by lazy {
             try {
                 Native.load("client_lib", RustUploaderLib::class.java) as RustUploaderLib
@@ -120,14 +164,48 @@ object RustUploader {
         udpPort: Int,
         httpPort: Int,
         blockSize: Int = 16384,
-        password: String? = null
+        password: String? = null,
+        onProgress: ((UploadProgress) -> Unit)? = null
     ): Int = withContext(Dispatchers.IO) {
-        val hashId = calculateHashId(filePath)
-        val sha256 = calculateSHA256(filePath)
-        Log.i(TAG, "Starting upload. File: $filePath, Hash ID: $hashId, SHA-256: $sha256, Server: $serverIp, UDP: $udpPort, HTTP: $httpPort")
+        Log.i(
+            TAG,
+            "Starting upload. File: $filePath, Server: $serverIp, UDP: $udpPort, HTTP: $httpPort"
+        )
+
+        val nativeCallback = onProgress?.let { listener ->
+            object : UploadProgressCallback {
+                override fun invoke(
+                    bytesTransferred: Long,
+                    totalBytes: Long,
+                    bytesPerSecond: Long
+                ) {
+                    try {
+                        listener(
+                            UploadProgress(
+                                bytesTransferred = bytesTransferred.coerceAtLeast(0L),
+                                totalBytes = totalBytes.coerceAtLeast(0L),
+                                bytesPerSecond = bytesPerSecond.coerceAtLeast(0L)
+                            )
+                        )
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Progress callback failed: ${t.message}", t)
+                    }
+                }
+            }
+        }
 
         try {
-            val resultCode = if (password.isNullOrEmpty()) {
+            val resultCode = if (nativeCallback != null) {
+                RustUploaderLib.INSTANCE.rtk_upload_file_with_password_and_progress(
+                    filePath = filePath,
+                    serverIp = serverIp,
+                    udpPort = udpPort.toShort(),
+                    httpPort = httpPort.toShort(),
+                    blockSize = blockSize.toLong(),
+                    password = password,
+                    progressCallback = nativeCallback
+                )
+            } else if (password.isNullOrEmpty()) {
                 RustUploaderLib.INSTANCE.rtk_upload_file(
                     filePath = filePath,
                     serverIp = serverIp,
@@ -147,14 +225,18 @@ object RustUploader {
             }
 
             if (resultCode == 0) {
-                Log.i(TAG, "Upload completed successfully! File: $filePath, Hash ID: $hashId")
+                Log.i(TAG, "Upload completed successfully! File: $filePath")
             } else {
-                Log.e(TAG, "Upload failed! Code: $resultCode, File: $filePath, Hash ID: $hashId")
+                Log.e(TAG, "Upload failed! Code: $resultCode, File: $filePath")
             }
             resultCode
+        } catch (e: UnsatisfiedLinkError) {
+            // Helpful when an old .so is accidentally packaged with the new APK.
+            Log.e(TAG, "Progress-enabled native symbol is missing: ${e.message}", e)
+            -98
         } catch (e: Throwable) {
-            Log.e(TAG, "FFI call crashed: ${e.message}, File: $filePath, Hash ID: $hashId")
-            -99 // Custom crash code
+            Log.e(TAG, "FFI call crashed: ${e.message}, File: $filePath", e)
+            -99
         }
     }
 }

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Simplified single-color file + transfer mark for Android themed icons. -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M36,20 H66 L82,36 V82 C82,87 78,91 73,91 H35 C30,91 26,87 26,82 V29 C26,24 30,20 36,20 Z M66,20 V33 C66,37 69,40 73,40 H82 Z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M46,47 H69 V40 L85,54 L69,68 V61 H46 C42,61 39,58 39,54 C39,50 42,47 46,47 Z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M62,65 H39 V58 L23,72 L39,86 V79 H62 C66,79 69,76 69,72 C69,68 66,65 62,65 Z" />
+</vector>

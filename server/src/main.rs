@@ -1791,8 +1791,10 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                 use std::io::{Seek, SeekFrom, Write};
                                 let mut file = OpenOptions::new().write(true).open(&file_path)?;
                                 file.seek(SeekFrom::Start(seek_begin))?;
+                                // write_all copies data into the OS page cache. Flushing every UDP chunk
+                                // serializes the hot path and destroys throughput; durability is handled
+                                // by the OS and normal file close semantics.
                                 file.write_all(&data)?;
-                                file.flush()?;
                                 Ok::<(), std::io::Error>(())
                             })
                             .await;
@@ -1836,13 +1838,21 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     );
                                 }
 
-                                // Save to SQLite
-                                let save_info = entry.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    if let Err(e) = save_upload_to_db(&db_path, &save_info) {
-                                        eprintln!("[DB] Failed to save update to DB: {}", e);
-                                    }
-                                });
+                                // Persist completion immediately, but checkpoint active uploads only
+                                // once per MiB boundary instead of doing a SQLite transaction per packet.
+                                const DB_CHECKPOINT_BYTES: u64 = 1024 * 1024;
+                                let end_pos = packet.seek_begin + packet.data.len() as u64;
+                                let should_persist = is_end
+                                    || end_pos / DB_CHECKPOINT_BYTES
+                                        != packet.seek_begin / DB_CHECKPOINT_BYTES;
+                                if should_persist {
+                                    let save_info = entry.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        if let Err(e) = save_upload_to_db(&db_path, &save_info) {
+                                            eprintln!("[DB] Failed to save update to DB: {}", e);
+                                        }
+                                    });
+                                }
                             }
 
                             // Send back ACK only on success

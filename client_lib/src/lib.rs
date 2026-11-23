@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -5,52 +6,168 @@ use std::net::SocketAddr;
 use std::os::raw::c_char;
 use std::path::Path;
 use tokio::net::UdpSocket;
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration, Instant};
 
-async fn send_chunk_with_retry(
+const MAX_RETRIES: usize = 30;
+const ACK_TIMEOUT: Duration = Duration::from_millis(150);
+const DEFAULT_WINDOW_SIZE: usize = 32;
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+
+pub type RtkProgressCallback = Option<extern "C" fn(u64, u64, u64)>;
+
+struct InFlightChunk {
+    packet: Vec<u8>,
+    expected_len: u64,
+    last_sent: Instant,
+    retries: usize,
+}
+
+async fn send_windowed_file(
     socket: &UdpSocket,
     server_addr: SocketAddr,
-    status: u8,
+    file: &mut File,
     packet_code: &[u8],
-    seek_begin: u64,
-    data: &[u8],
+    start_offset: u64,
+    file_size: u64,
+    block_size: usize,
+    window_size: usize,
+    progress_callback: RtkProgressCallback,
 ) -> Result<(), String> {
-    let pkt_bytes = common::UdpPacket::serialize(status, packet_code, seek_begin, data);
-    let mut retry_count = 0;
-    const MAX_RETRIES: usize = 30;
-    const TIMEOUT_DUR: Duration = Duration::from_millis(150);
+    let mut next_offset = start_offset;
+    let mut confirmed_bytes = 0u64;
+    let transfer_started = Instant::now();
+    let mut last_progress_report: Option<Instant> = None;
 
-    let expected_bytes_received = if status == 0 { 0 } else { data.len() as u64 };
+    if let Some(callback) = progress_callback {
+        callback(start_offset.min(file_size), file_size, 0);
+    }
+    let mut in_flight: BTreeMap<u64, InFlightChunk> = BTreeMap::new();
+    let mut read_buf = vec![0u8; block_size];
+    let mut ack_buf = [0u8; 1024];
+    file.seek(SeekFrom::Start(start_offset))
+        .map_err(|e| e.to_string())?;
 
-    loop {
-        if let Err(_) = socket.send_to(&pkt_bytes, server_addr).await {
-            // Log to stderr or ignore
+    while next_offset < file_size || !in_flight.is_empty() {
+        while next_offset < file_size && in_flight.len() < window_size {
+            let to_read = ((file_size - next_offset) as usize).min(block_size);
+            let n = file
+                .read(&mut read_buf[..to_read])
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            let packet = common::UdpPacket::serialize(1, packet_code, next_offset, &read_buf[..n]);
+            socket
+                .send_to(&packet, server_addr)
+                .await
+                .map_err(|e| e.to_string())?;
+            in_flight.insert(
+                next_offset,
+                InFlightChunk {
+                    packet,
+                    expected_len: n as u64,
+                    last_sent: Instant::now(),
+                    retries: 0,
+                },
+            );
+            next_offset += n as u64;
         }
 
-        let mut ack_buf = vec![0u8; 1024];
-        match timeout(TIMEOUT_DUR, socket.recv_from(&mut ack_buf)).await {
-            Ok(Ok((len, _src))) => match common::AckPacket::parse(&ack_buf[..len]) {
-                Ok(ack) => {
+        match timeout(Duration::from_millis(10), socket.recv_from(&mut ack_buf)).await {
+            Ok(Ok((len, src))) if src == server_addr => {
+                if let Ok(ack) = common::AckPacket::parse(&ack_buf[..len]) {
+                    if ack.packet_code == packet_code {
+                        let valid = in_flight
+                            .get(&ack.seek_begin)
+                            .map(|c| c.expected_len == ack.bytes_received)
+                            .unwrap_or(false);
+                        if valid {
+                            if let Some(chunk) = in_flight.remove(&ack.seek_begin) {
+                                confirmed_bytes =
+                                    confirmed_bytes.saturating_add(chunk.expected_len);
+                                if let Some(callback) = progress_callback {
+                                    let now = Instant::now();
+                                    let should_report = last_progress_report
+                                        .map(|last| now.duration_since(last) >= PROGRESS_INTERVAL)
+                                        .unwrap_or(true)
+                                        || start_offset.saturating_add(confirmed_bytes)
+                                            >= file_size;
+
+                                    if should_report {
+                                        let elapsed =
+                                            now.duration_since(transfer_started).as_secs_f64();
+                                        let bytes_per_second = if elapsed > 0.0 {
+                                            (confirmed_bytes as f64 / elapsed) as u64
+                                        } else {
+                                            0
+                                        };
+                                        callback(
+                                            start_offset
+                                                .saturating_add(confirmed_bytes)
+                                                .min(file_size),
+                                            file_size,
+                                            bytes_per_second,
+                                        );
+                                        last_progress_report = Some(now);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Err(e)) => return Err(e.to_string()),
+            _ => {}
+        }
+
+        let now = Instant::now();
+        for (&offset, chunk) in in_flight.iter_mut() {
+            if now.duration_since(chunk.last_sent) >= ACK_TIMEOUT {
+                if chunk.retries >= MAX_RETRIES {
+                    return Err(format!(
+                        "Timeout at offset {} after {} retries",
+                        offset, MAX_RETRIES
+                    ));
+                }
+                socket
+                    .send_to(&chunk.packet, server_addr)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                chunk.retries += 1;
+                chunk.last_sent = Instant::now();
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn send_end_with_retry(
+    socket: &UdpSocket,
+    server_addr: SocketAddr,
+    packet_code: &[u8],
+    file_size: u64,
+) -> Result<(), String> {
+    let packet = common::UdpPacket::serialize(0, packet_code, file_size, &[]);
+    let mut ack_buf = [0u8; 1024];
+    for _ in 0..=MAX_RETRIES {
+        socket
+            .send_to(&packet, server_addr)
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Ok(Ok((len, src))) = timeout(ACK_TIMEOUT, socket.recv_from(&mut ack_buf)).await {
+            if src == server_addr {
+                if let Ok(ack) = common::AckPacket::parse(&ack_buf[..len]) {
                     if ack.packet_code == packet_code
-                        && ack.seek_begin == seek_begin
-                        && ack.bytes_received == expected_bytes_received
+                        && ack.seek_begin == file_size
+                        && ack.bytes_received == 0
                     {
                         return Ok(());
                     }
                 }
-                Err(_) => {}
-            },
-            Ok(Err(_)) => {}
-            Err(_) => {}
+            }
         }
-
-        retry_count += 1;
-        if retry_count > MAX_RETRIES {
-            return Err(format!("Timeout after {} retries", MAX_RETRIES));
-        }
-
-        tokio::time::sleep(Duration::from_millis(5 * (retry_count as u64).min(10))).await;
     }
+    Err("End packet ACK timeout".to_string())
 }
 
 /// Exposes the upload logic to C-compatible programs.
@@ -79,13 +196,14 @@ pub extern "C" fn rtk_upload_file(
     http_port: u16,
     block_size: usize,
 ) -> i32 {
-    rtk_upload_file_with_password(
+    upload_file_impl(
         c_file_path,
         c_server_ip,
         udp_port,
         http_port,
         block_size,
         std::ptr::null(),
+        None,
     )
 }
 
@@ -97,6 +215,53 @@ pub extern "C" fn rtk_upload_file_with_password(
     http_port: u16,
     block_size: usize,
     c_password: *const c_char,
+) -> i32 {
+    upload_file_impl(
+        c_file_path,
+        c_server_ip,
+        udp_port,
+        http_port,
+        block_size,
+        c_password,
+        None,
+    )
+}
+
+/// Uploads a file and reports confirmed transfer progress through a C callback.
+///
+/// The callback arguments are:
+/// - confirmed bytes (ACKed by the server, including resume offset)
+/// - total file bytes
+/// - effective confirmed bytes per second for this upload session
+#[no_mangle]
+pub extern "C" fn rtk_upload_file_with_password_and_progress(
+    c_file_path: *const c_char,
+    c_server_ip: *const c_char,
+    udp_port: u16,
+    http_port: u16,
+    block_size: usize,
+    c_password: *const c_char,
+    progress_callback: RtkProgressCallback,
+) -> i32 {
+    upload_file_impl(
+        c_file_path,
+        c_server_ip,
+        udp_port,
+        http_port,
+        block_size,
+        c_password,
+        progress_callback,
+    )
+}
+
+fn upload_file_impl(
+    c_file_path: *const c_char,
+    c_server_ip: *const c_char,
+    udp_port: u16,
+    http_port: u16,
+    block_size: usize,
+    c_password: *const c_char,
+    progress_callback: RtkProgressCallback,
 ) -> i32 {
     if c_file_path.is_null() || c_server_ip.is_null() {
         return -1;
@@ -204,6 +369,8 @@ pub extern "C" fn rtk_upload_file_with_password(
                     if let Some(offset) = json.get("bytes_received").and_then(|v| v.as_u64()) {
                         let b_size = block_size as u64;
                         seek_begin = (offset / b_size) * b_size;
+                        // Rewind one window because the server high-water mark may include out-of-order chunks.
+                        seek_begin = seek_begin.saturating_sub(DEFAULT_WINDOW_SIZE as u64 * b_size);
                     }
                 }
             }
@@ -225,45 +392,27 @@ pub extern "C" fn rtk_upload_file_with_password(
             Err(_) => return -6,
         };
 
-        // Transmission loop
-        let mut buffer = vec![0u8; block_size];
-
-        while seek_begin < file_size {
-            if file.seek(SeekFrom::Start(seek_begin)).is_err() {
-                return -2;
-            }
-            let bytes_read = match file.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(_) => return -2,
-            };
-
-            if let Err(_) = send_chunk_with_retry(
-                &udp_socket,
-                server_udp_addr,
-                1,
-                &packet_code_bytes,
-                seek_begin,
-                &buffer[..bytes_read],
-            )
-            .await
-            {
-                return -7;
-            }
-
-            seek_begin += bytes_read as u64;
-        }
-
-        // Send end packet
-        if let Err(_) = send_chunk_with_retry(
+        // Windowed transmission: keep multiple chunks in flight to hide network RTT.
+        if send_windowed_file(
             &udp_socket,
             server_udp_addr,
-            0,
+            &mut file,
             &packet_code_bytes,
+            seek_begin,
             file_size,
-            &[],
+            block_size,
+            DEFAULT_WINDOW_SIZE,
+            progress_callback,
         )
         .await
+        .is_err()
+        {
+            return -7;
+        }
+
+        if send_end_with_retry(&udp_socket, server_udp_addr, &packet_code_bytes, file_size)
+            .await
+            .is_err()
         {
             return -7;
         }
