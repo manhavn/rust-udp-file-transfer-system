@@ -17,6 +17,8 @@ VERSION="${VERSION:-$(sed -n 's/^version = "\(.*\)"$/\1/p' common/Cargo.toml | h
 BASE="${PROJECT_NAME}-v${VERSION}"
 OUTPUTS_DIR="$ROOT/outputs"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/rtk-build-all.XXXXXX")"
+STAGE_OUT="$STAGE/out"
+mkdir -p "$STAGE_OUT"
 trap 'rm -rf "$STAGE"' EXIT
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -25,14 +27,15 @@ warn() { echo "warn: $*" >&2; }
 
 usage() {
   cat <<EOF
-Usage: $0 [--clean] [all|rust|gui|android]...
+Usage: $0 [--keep] [all|rust|gui|android]...
   all      build every component (default)
   rust     server + client_cli cross-platform archives
   gui      desktop GUI bundles for the current platform
   android  signed Android release APK
 
 Options:
-  --clean  remove outputs/ before building
+  --clean  rebuild outputs/ from scratch (default)
+  --keep   keep files already present in outputs/
 
 Environment:
   VERSION  override the version read from common/Cargo.toml
@@ -41,7 +44,7 @@ Artifacts: $OUTPUTS_DIR
 EOF
 }
 
-SELECT_RUST=0 SELECT_GUI=0 SELECT_ANDROID=0 CLEAN=0
+SELECT_RUST=0 SELECT_GUI=0 SELECT_ANDROID=0 KEEP=0
 if (( $# == 0 )); then set -- all; fi
 for component in "$@"; do
   case "$component" in
@@ -49,7 +52,8 @@ for component in "$@"; do
     rust|server|cli) SELECT_RUST=1 ;;
     gui) SELECT_GUI=1 ;;
     android) SELECT_ANDROID=1 ;;
-    --clean) CLEAN=1 ;;
+    --clean) KEEP=0 ;;
+    --keep) KEEP=1 ;;
     -h|--help|help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -61,10 +65,6 @@ fi
 info "Release ${BASE}"
 
 [[ "$OUTPUTS_DIR" != "/" && "$OUTPUTS_DIR" != "$ROOT" ]] || { echo "error: unsafe outputs path: $OUTPUTS_DIR" >&2; exit 1; }
-if (( CLEAN )); then
-  rm -rf "$OUTPUTS_DIR"
-fi
-mkdir -p "$OUTPUTS_DIR"
 
 collect_rust() {
   local dist="$1" archive name renamed
@@ -74,7 +74,7 @@ collect_rust() {
     [[ "$archive" == *.sha256 ]] && continue
     name="$(basename "$archive")"
     renamed="${name/"$PROJECT_NAME"/"$BASE"}"
-    cp -f "$archive" "$OUTPUTS_DIR/$renamed"
+    cp -f "$archive" "$STAGE_OUT/$renamed"
   done
   shopt -u nullglob
 }
@@ -115,7 +115,7 @@ build_gui() {
   local bundle="target/release/bundle" file copied=0
   if [[ -d "$bundle" ]]; then
     while IFS= read -r -d '' file; do
-      cp -f "$file" "$OUTPUTS_DIR/"
+      cp -f "$file" "$STAGE_OUT/"
       copied=$((copied + 1))
     done < <(find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
              -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \) -print0)
@@ -129,13 +129,25 @@ build_android() {
   ./build_android.sh release
   local apk="android-app/app/build/outputs/apk/release/app-release.apk"
   [[ -f "$apk" ]] || { echo "error: APK not found: $apk" >&2; return 1; }
-  cp -f "$apk" "$OUTPUTS_DIR/${BASE}-android.apk"
+  cp -f "$apk" "$STAGE_OUT/${BASE}-android.apk"
 }
 
 FAILED=()
 if (( SELECT_RUST )); then build_rust || FAILED+=("rust"); fi
 if (( SELECT_GUI )); then build_gui || FAILED+=("gui"); fi
 if (( SELECT_ANDROID )); then build_android || FAILED+=("android"); fi
+
+# Publish only after every component ran, so a failure keeps what did build.
+if (( KEEP == 0 )); then
+  rm -rf "$OUTPUTS_DIR"
+fi
+mkdir -p "$OUTPUTS_DIR"
+shopt -s nullglob
+staged=("$STAGE_OUT/"*)
+if (( ${#staged[@]} > 0 )); then
+  cp -f "${staged[@]}" "$OUTPUTS_DIR/"
+fi
+shopt -u nullglob
 
 info "Writing SHA256SUMS.txt"
 (
