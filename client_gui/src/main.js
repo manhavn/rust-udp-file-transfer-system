@@ -1,5 +1,9 @@
 const { invoke } = window.__TAURI__.core;
 
+const DEFAULT_UDP_PORT = "5000";
+const DEFAULT_HTTP_PORT = "8080";
+const DEFAULT_BLOCK_SIZE = "16384";
+
 let statusCard;
 let statusLabel;
 let statusText;
@@ -22,6 +26,7 @@ let btnTogglePassword;
 let connectionPreview;
 let btnStartUpload;
 let btnBgUpload;
+let btnResetAdvanced;
 let btnClearHistory;
 let historyEmpty;
 let historyList;
@@ -66,6 +71,7 @@ function initDOMElements() {
 
   btnStartUpload = document.getElementById("btn-start-upload");
   btnBgUpload = document.getElementById("btn-bg-upload");
+  btnResetAdvanced = document.getElementById("btn-reset-advanced");
   btnClearHistory = document.getElementById("btn-clear-history");
   historyEmpty = document.getElementById("history-empty");
   historyList = document.getElementById("history-list");
@@ -83,6 +89,7 @@ function setupEventListeners() {
   btnCreateDemo.addEventListener("click", createDemoFile);
   btnStartUpload.addEventListener("click", () => performUploadAction(false));
   btnBgUpload.addEventListener("click", () => performUploadAction(true));
+  btnResetAdvanced.addEventListener("click", resetAdvancedSettings);
 
   btnClearHistory.addEventListener("click", () => {
     if (confirm("Xóa toàn bộ lịch sử truyền file trên máy này?")) {
@@ -178,10 +185,24 @@ async function setSelectedFile(filePath) {
 
 function loadSettings() {
   inputServerIp.value = localStorage.getItem("server_ip") || "";
-  inputUdpPort.value = localStorage.getItem("udp_port") || "5000";
-  inputHttpPort.value = localStorage.getItem("http_port") || "8080";
-  inputBlockSize.value = localStorage.getItem("block_size") || "16384";
+  inputUdpPort.value = localStorage.getItem("udp_port") || DEFAULT_UDP_PORT;
+  inputHttpPort.value = localStorage.getItem("http_port") || DEFAULT_HTTP_PORT;
+  inputBlockSize.value = localStorage.getItem("block_size") || DEFAULT_BLOCK_SIZE;
   inputPassword.value = localStorage.getItem("password") || "";
+}
+
+function resetAdvancedSettings() {
+  inputUdpPort.value = DEFAULT_UDP_PORT;
+  inputHttpPort.value = DEFAULT_HTTP_PORT;
+  inputBlockSize.value = DEFAULT_BLOCK_SIZE;
+  saveSettings();
+  updateConnectionPreview();
+  updateActionAvailability();
+  setStatus(
+    "info",
+    "Đã khôi phục mặc định",
+    `UDP ${DEFAULT_UDP_PORT} · HTTP ${DEFAULT_HTTP_PORT} · Block size ${DEFAULT_BLOCK_SIZE} bytes.`
+  );
 }
 
 function saveSettings() {
@@ -213,6 +234,9 @@ function updateActionAvailability() {
 
   btnStartUpload.disabled = !ready || directUploadRunning;
   btnBgUpload.disabled = !ready || directUploadRunning;
+  if (btnResetAdvanced) {
+    btnResetAdvanced.disabled = directUploadRunning;
+  }
 }
 
 function loadHistory() {

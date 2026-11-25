@@ -8,7 +8,31 @@ Hướng dẫn này chỉ ra các bước để triển khai Server lên môi tr
 
 Để server hoạt động liên tục ở chế độ chạy ngầm và tự động khởi động cùng hệ thống, bạn nên cấu hình nó dưới dạng một dịch vụ `systemd`.
 
-### 1.1. Cấu Hình Dịch Vụ Systemd
+### 1.0. Cài Đặt Nhanh Bằng Subcommand Tích Hợp (Khuyên Dùng)
+
+Binary `rtk-udp-server` hỗ trợ sẵn các lệnh quản lý `systemd` (`install`, `enable`, `disable`, `start`, `stop`, `restart`, `status`, `logs`, `uninstall`):
+
+```bash
+# 1) Bật tự khởi động cùng hệ thống và chạy ngay (user service)
+rtk-udp-server enable --now
+
+# Hoặc dùng phạm vi toàn hệ thống (system service trong /etc/systemd/system)
+sudo rtk-udp-server enable --system --now --udp-port 5000 --http-port 8080 --disable-request-log
+
+# 2) Kiểm tra trạng thái & nhật ký
+rtk-udp-server status
+rtk-udp-server logs -f
+
+# 3) Bật / tắt / khởi động lại / hủy tự khởi động
+rtk-udp-server start
+rtk-udp-server stop
+rtk-udp-server restart
+rtk-udp-server disable --now
+```
+
+> **Lưu ý khi cài đặt qua `mise`:** `rtk-udp-server` tự động phát hiện đường dẫn `shims` của `mise` để ghi vào `ExecStart` (không ghi đường dẫn cố định theo version), nên việc nâng cấp qua `mise` không làm hỏng unit file.
+
+### 1.1. Cấu Hình Dịch Vụ Systemd Thủ Công (Manual Unit Setup)
 Tạo một tệp cấu hình service tại `/etc/systemd/system/rtk-udp-server.service`:
 
 ```ini

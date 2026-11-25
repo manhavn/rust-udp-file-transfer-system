@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>UDP Secure Transfer</title>
+    <link rel="icon" type="image/png" href="/assets/app-icon.png" />
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="/main.js" defer></script>
   </head>
@@ -14,11 +15,7 @@
       <header class="topbar">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 3v12" />
-              <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
-              <path d="M5 20h14" />
-            </svg>
+            <img src="/assets/app-icon.png" alt="RTK UDP Transfer" class="brand-icon" />
           </div>
           <div>
             <h1>UDP Secure Transfer</h1>
@@ -84,14 +81,9 @@
               </button>
               <button type="button" id="btn-bg-upload" class="btn btn-ghost btn-large" disabled>
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 2v4" />
-                  <path d="M12 18v4" />
-                  <path d="m4.93 4.93 2.83 2.83" />
-                  <path d="m16.24 16.24 2.83 2.83" />
-                  <path d="M2 12h4" />
-                  <path d="M18 12h4" />
-                  <path d="m4.93 19.07 2.83-2.83" />
-                  <path d="m16.24 7.76 2.83-2.83" />
+                  <path d="M12 13v8" />
+                  <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+                  <path d="m8 17 4-4 4 4" />
                 </svg>
                 <span>Gửi nền</span>
               </button>
@@ -181,6 +173,15 @@
                   <label for="input-block-size">Block size <span class="optional">bytes</span></label>
                   <input type="number" id="input-block-size" value="16384" min="512" />
                   <span class="field-help">Mặc định 16 KiB. Chỉ đổi khi bạn biết cấu hình server phù hợp.</span>
+                </div>
+                <div class="advanced-actions">
+                  <button type="button" id="btn-reset-advanced" class="btn btn-secondary compact-btn">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                      <path d="M3 3v5h5" />
+                    </svg>
+                    <span>Khôi phục mặc định</span>
+                  </button>
                 </div>
               </div>
             </details>

@@ -2,6 +2,65 @@ use std::ffi::CString;
 use std::fs::File;
 use std::io::Write;
 use std::os::raw::c_char;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, RunEvent, WindowEvent,
+};
+
+struct AppQuitState(AtomicBool);
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn hide_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+#[cfg(desktop)]
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, "show", "Mở RTK UDP Transfer", true, None::<&str>)?;
+    let hide_item = MenuItem::with_id(app, "hide", "Ẩn xuống khay hệ thống", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Thoát hoàn toàn", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &hide_item, &separator, &quit_item])?;
+
+    TrayIconBuilder::with_id("main-tray")
+        .icon(tauri::include_image!("icons/128x128.png"))
+        .tooltip("RTK UDP Transfer")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "hide" => hide_main_window(app),
+            "quit" => {
+                app.state::<AppQuitState>().0.store(true, Ordering::SeqCst);
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
 
 #[tauri::command]
 fn select_file() -> Option<String> {
@@ -99,8 +158,27 @@ async fn perform_upload(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        .manage(AppQuitState(AtomicBool::new(false)))
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            #[cfg(desktop)]
+            setup_tray(app)?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let is_quitting = window
+                    .app_handle()
+                    .state::<AppQuitState>()
+                    .0
+                    .load(Ordering::SeqCst);
+                if !is_quitting {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             select_file,
             get_file_size,
@@ -108,6 +186,15 @@ pub fn run() {
             calculate_hash,
             perform_upload
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let RunEvent::ExitRequested { api, .. } = event {
+            let is_quitting = app_handle.state::<AppQuitState>().0.load(Ordering::SeqCst);
+            if !is_quitting {
+                api.prevent_exit();
+            }
+        }
+    });
 }

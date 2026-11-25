@@ -117,6 +117,28 @@ Bạn có thể tùy ý điều chỉnh chu kỳ quét dọn dẹp, thời gian 
     scripts\run_server_windows.bat --udp-port 5000 --http-port 8080 --upload-dir .\uploads --db-path .\db\data.sqlite --cleanup-interval 3 --incomplete-timeout 30 --completed-timeout 20 --disable-request-log
     ```
 
+#### Quản lý Server như Dịch vụ Hệ thống (systemd / systemctl trên Linux):
+Binary `rtk-udp-server` tích hợp sẵn các subcommand giống các CLI tool hiện đại để cài đặt, bật/tắt khởi động cùng hệ thống và kiểm tra trạng thái dịch vụ:
+```bash
+# Cài đặt và bật tự khởi động cùng hệ thống + chạy ngay (mặc định user service)
+rtk-udp-server enable --now
+
+# Hoặc cài đặt ở phạm vi toàn hệ thống (system-wide service)
+sudo rtk-udp-server enable --system --now --udp-port 5000 --http-port 8080
+
+# Các lệnh điều khiển và theo dõi
+rtk-udp-server status       # Kiểm tra trạng thái chạy, PID, chế độ tự khởi động
+rtk-udp-server start        # Khởi động service
+rtk-udp-server stop         # Dừng service
+rtk-udp-server restart      # Khởi động lại service
+rtk-udp-server disable      # Tắt tự khởi động cùng hệ thống (thêm --now để dừng ngay)
+rtk-udp-server logs -f      # Xem nhật ký service qua journalctl
+rtk-udp-server install      # Chỉ tạo/cập nhật tệp unit systemd
+rtk-udp-server uninstall    # Dừng, tắt và xóa tệp unit systemd (giữ lại uploads/db)
+```
+> [!TIP]
+> Khi cài đặt bằng `mise`, lệnh `install`/`enable` tự động nhận diện và trỏ `ExecStart` qua đường dẫn `shims` của `mise` (thay vì đường dẫn theo version), giúp service không bị gãy khi bạn cập nhật phiên bản mới.
+
 ---
 
 ### 4.2. Gửi tệp tin lên Server (Client CLI)
@@ -214,7 +236,7 @@ Cả Server và Client đều hỗ trợ đọc các giá trị cấu hình từ
 | Biến môi trường | Tham số CLI tương ứng | Giá trị mặc định | Mô tả |
 | :--- | :--- | :--- | :--- |
 | `UDP_PORT` | `--udp-port`, `-u` | `5000` | Cổng UDP nhận dữ liệu |
-| `HTTP_PORT` | `--http-port`, `-h` | `8080` | Cổng HTTP REST API & Dashboard |
+| `HTTP_PORT` | `--http-port`, `-t` | `8080` | Cổng HTTP REST API & Dashboard |
 | `UPLOAD_DIR` | `--upload-dir` | `./uploads` | Thư mục lưu trữ tệp tin trên disk |
 | `DB_PATH` | `--db-path` | `./db/data.sqlite` | Đường dẫn file cơ sở dữ liệu SQLite |
 | `CLEANUP_INTERVAL` | `--cleanup-interval` | `5` | Chu kỳ quét dọn dẹp (phút) |

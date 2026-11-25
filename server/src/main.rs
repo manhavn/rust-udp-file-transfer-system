@@ -1,3 +1,6 @@
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod service;
+
 use axum::{
     extract::{Path, State},
     response::{Html, IntoResponse},
@@ -8,11 +11,60 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
+
+static LOG_TX: OnceLock<tokio::sync::mpsc::Sender<(bool, String)>> = OnceLock::new();
+
+fn init_nonblocking_logger() {
+    if LOG_TX.get().is_some() {
+        return;
+    }
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(bool, String)>(512);
+    if LOG_TX.set(tx).is_ok() {
+        let _ = std::thread::Builder::new()
+            .name("rtk-logger".to_string())
+            .spawn(move || {
+                while let Some((is_stderr, msg)) = rx.blocking_recv() {
+                    if is_stderr {
+                        let _ = writeln!(std::io::stderr(), "{}", msg);
+                    } else {
+                        let _ = writeln!(std::io::stdout(), "{}", msg);
+                    }
+                }
+            });
+    }
+}
+
+fn try_enqueue_log(
+    tx: &tokio::sync::mpsc::Sender<(bool, String)>,
+    is_stderr: bool,
+    msg: String,
+) -> bool {
+    tx.try_send((is_stderr, msg)).is_ok()
+}
+
+fn log_info(msg: impl Into<String>) {
+    let msg = msg.into();
+    if let Some(tx) = LOG_TX.get() {
+        let _ = try_enqueue_log(tx, false, msg);
+    } else {
+        println!("{}", msg);
+    }
+}
+
+fn log_err(msg: impl Into<String>) {
+    let msg = msg.into();
+    if let Some(tx) = LOG_TX.get() {
+        let _ = try_enqueue_log(tx, true, msg);
+    } else {
+        eprintln!("{}", msg);
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UploadInfo {
@@ -31,15 +83,18 @@ pub struct UploadInfo {
 }
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "rtk-server")]
+#[command(name = "rtk-udp-server", version)]
 #[command(about = "Server truyền tải file qua UDP & Web Dashboard", long_about = None)]
 pub struct Args {
+    #[command(subcommand)]
+    pub command: Option<service::ServiceCommand>,
+
     /// Cổng UDP lắng nghe
     #[arg(short, long, env = "UDP_PORT", default_value_t = 5000)]
     pub udp_port: u16,
 
     /// Cổng HTTP REST API & Dashboard
-    #[arg(short, long, env = "HTTP_PORT", default_value_t = 8080)]
+    #[arg(short = 't', long, env = "HTTP_PORT", default_value_t = 8080)]
     pub http_port: u16,
 
     /// Thư mục chứa các tệp tải lên
@@ -1204,68 +1259,80 @@ impl<S> Drop for DownloadStream<S> {
         let state = self.state.clone();
         let packet_code = self.packet_code.clone();
         tokio::spawn(async move {
-            let mut lock = state.write().await;
-            let current_count = if let Some(count) = lock.active_downloads.get_mut(&packet_code) {
-                if *count > 0 {
-                    *count -= 1;
+            let (current_count, disable_log, delete_job) = {
+                let mut lock = state.write().await;
+                let current_count = if let Some(count) = lock.active_downloads.get_mut(&packet_code)
+                {
+                    if *count > 0 {
+                        *count -= 1;
+                    }
+                    *count
+                } else {
+                    0
+                };
+
+                let disable_log = lock.disable_request_log;
+                let mut delete_job = None;
+
+                if current_count == 0 {
+                    lock.active_downloads.remove(&packet_code);
+
+                    let mut should_delete = false;
+                    let mut file_name = String::new();
+                    let mut is_completed = false;
+                    if let Some(upload) = lock.uploads.get(&packet_code) {
+                        if let Some(delete_at) = upload.delete_at {
+                            if Utc::now() >= delete_at {
+                                should_delete = true;
+                                file_name = upload.file_name.clone();
+                                is_completed = upload.status == "Hoàn thành";
+                            }
+                        }
+                    }
+                    if should_delete {
+                        lock.uploads.remove(&packet_code);
+                        let file_name_disk = format!("{}.bin", packet_code);
+                        let file_path =
+                            std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
+                        let db_path = lock.db_path.clone();
+                        delete_job = Some((file_path, db_path, file_name, is_completed));
+                    }
                 }
-                *count
-            } else {
-                0
+
+                (current_count, disable_log, delete_job)
             };
 
-            let disable_log = lock.disable_request_log;
             if !disable_log {
-                println!(
+                log_info(format!(
                     "[HTTP] Download completed or disconnected for {}. Active downloads: {}",
                     packet_code, current_count
-                );
+                ));
             }
 
-            if current_count == 0 {
-                lock.active_downloads.remove(&packet_code);
-
-                let mut should_delete = false;
-                let mut file_name = String::new();
-                let mut is_completed = false;
-                if let Some(upload) = lock.uploads.get(&packet_code) {
-                    if let Some(delete_at) = upload.delete_at {
-                        if Utc::now() >= delete_at {
-                            should_delete = true;
-                            file_name = upload.file_name.clone();
-                            is_completed = upload.status == "Hoàn thành";
-                        }
-                    }
-                }
-                if should_delete {
-                    lock.uploads.remove(&packet_code);
-                    let file_name_disk = format!("{}.bin", packet_code);
-                    let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
+            if let Some((file_path, db_path, file_name, is_completed)) = delete_job {
+                let code_clone = packet_code.clone();
+                let _ = tokio::task::spawn_blocking(move || {
                     let _ = std::fs::remove_file(&file_path);
-
-                    let db_path = lock.db_path.clone();
-                    let code_clone = packet_code.clone();
-                    let _ = tokio::task::spawn_blocking(move || {
-                        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-                            let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
-                            let _ = conn.execute(
-                                "DELETE FROM uploads WHERE packet_code = ?1",
-                                rusqlite::params![code_clone],
-                            );
-                        }
-                    })
-                    .await;
-                    if !disable_log {
-                        let type_str = if is_completed {
-                            "completed"
-                        } else {
-                            "incomplete"
-                        };
-                        println!(
-                            "[HTTP Drop Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
-                            type_str, packet_code, file_name
+                    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+                        let _ = conn.execute(
+                            "DELETE FROM uploads WHERE packet_code = ?1",
+                            rusqlite::params![code_clone],
                         );
                     }
+                })
+                .await;
+
+                if !disable_log {
+                    let type_str = if is_completed {
+                        "completed"
+                    } else {
+                        "incomplete"
+                    };
+                    log_info(format!(
+                        "[HTTP Drop Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
+                        type_str, packet_code, file_name
+                    ));
                 }
             }
         });
@@ -1310,13 +1377,6 @@ async fn download_file(
 
             let file_name_disk = format!("{}.bin", packet_code);
             let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
-            if !file_path.exists() {
-                return (
-                    axum::http::StatusCode::NOT_FOUND,
-                    "File vật lý không tồn tại trên server",
-                )
-                    .into_response();
-            }
             (upload.file_name.clone(), file_path)
         } else {
             return (
@@ -1327,8 +1387,16 @@ async fn download_file(
         }
     };
 
+    if !tokio::fs::try_exists(&file_path).await.unwrap_or(false) {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            "File vật lý không tồn tại trên server",
+        )
+            .into_response();
+    }
+
     // 2. Increment active downloads counter
-    {
+    let (current_count, disable_log) = {
         let mut lock = state.write().await;
         let disable_log = lock.disable_request_log;
         let count = lock
@@ -1336,13 +1404,13 @@ async fn download_file(
             .entry(packet_code.clone())
             .or_insert(0);
         *count += 1;
-        let current_count = *count;
-        if !disable_log {
-            println!(
-                "[HTTP] Starting download for {}. Active downloads: {}",
-                packet_code, current_count
-            );
-        }
+        (*count, disable_log)
+    };
+    if !disable_log {
+        log_info(format!(
+            "[HTTP] Starting download for {}. Active downloads: {}",
+            packet_code, current_count
+        ));
     }
 
     // Guess MIME type or use application/octet-stream
@@ -1460,102 +1528,104 @@ async fn register_upload(
     State(state): State<Arc<RwLock<ServerState>>>,
     Json(payload): Json<RegisterRequest>,
 ) -> Json<serde_json::Value> {
-    let mut lock = state.write().await;
     let file_name_disk = format!("{}.bin", payload.packet_code);
-    let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
-
-    // Check if the upload already exists and determine the safe resume offset
-    let (bytes_received, status, delete_at, extended_delete_at) =
-        if let Some(existing) = lock.uploads.get(&payload.packet_code) {
-            let disk_size = if file_path.exists() {
-                file_path.metadata().map(|m| m.len()).unwrap_or(0)
-            } else {
-                0
-            };
-            // The resume point is the minimum of what we recorded and what is actually on disk
-            let resume_offset = existing.bytes_received.min(disk_size);
-            let new_delete_at = if existing.status == "Hoàn thành" {
-                Some(Utc::now() + chrono::Duration::minutes(lock.completed_timeout_mins))
-            } else {
-                Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins))
-            };
-            (
-                resume_offset,
-                existing.status.clone(),
-                new_delete_at,
-                existing.extended_delete_at,
-            )
-        } else {
-            let new_delete_at =
-                Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins));
-            (0, "Đang nhận".to_string(), new_delete_at, None)
-        };
-
-    // Use payload password or retain existing password if it was set
-    let password = payload.password.clone().or_else(|| {
-        if let Some(existing) = lock.uploads.get(&payload.packet_code) {
-            existing.password.clone()
-        } else {
-            None
-        }
-    });
-    let has_password = password.is_some() && !password.as_ref().unwrap().is_empty();
-
-    let started_at = Utc::now();
-    let info = UploadInfo {
-        packet_code: payload.packet_code.clone(),
-        file_name: payload.file_name.clone(),
-        file_size: payload.file_size,
-        bytes_received,
-        status: status.clone(),
-        started_at,
-        completed_at: if status == "Hoàn thành" {
-            Some(started_at)
-        } else {
-            None
-        },
-        delete_at,
-        extended_delete_at,
-        has_password,
-        password,
+    let file_path = {
+        let lock = state.read().await;
+        std::path::Path::new(&lock.upload_dir).join(&file_name_disk)
     };
-    lock.uploads
-        .insert(payload.packet_code.clone(), info.clone());
+    let disk_meta = tokio::fs::metadata(&file_path).await.ok();
+    let disk_exists = disk_meta.is_some();
+    let disk_size = disk_meta.map(|m| m.len()).unwrap_or(0);
 
-    // Save to SQLite
-    let db_path = lock.db_path.clone();
-    let save_info = info.clone();
+    let (bytes_received, db_path, save_info, disable_log) = {
+        let mut lock = state.write().await;
+
+        // Check if the upload already exists and determine the safe resume offset
+        let (bytes_received, status, delete_at, extended_delete_at) =
+            if let Some(existing) = lock.uploads.get(&payload.packet_code) {
+                // The resume point is the minimum of what we recorded and what is actually on disk
+                let resume_offset = existing.bytes_received.min(disk_size);
+                let new_delete_at = if existing.status == "Hoàn thành" {
+                    Some(Utc::now() + chrono::Duration::minutes(lock.completed_timeout_mins))
+                } else {
+                    Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins))
+                };
+                (
+                    resume_offset,
+                    existing.status.clone(),
+                    new_delete_at,
+                    existing.extended_delete_at,
+                )
+            } else {
+                let new_delete_at =
+                    Some(Utc::now() + chrono::Duration::minutes(lock.incomplete_timeout_mins));
+                (0, "Đang nhận".to_string(), new_delete_at, None)
+            };
+
+        // Use payload password or retain existing password if it was set
+        let password = payload.password.clone().or_else(|| {
+            lock.uploads
+                .get(&payload.packet_code)
+                .and_then(|existing| existing.password.clone())
+        });
+        let has_password = password.as_deref().is_some_and(|p| !p.is_empty());
+
+        let started_at = Utc::now();
+        let info = UploadInfo {
+            packet_code: payload.packet_code.clone(),
+            file_name: payload.file_name.clone(),
+            file_size: payload.file_size,
+            bytes_received,
+            status: status.clone(),
+            started_at,
+            completed_at: if status == "Hoàn thành" {
+                Some(started_at)
+            } else {
+                None
+            },
+            delete_at,
+            extended_delete_at,
+            has_password,
+            password,
+        };
+        lock.uploads
+            .insert(payload.packet_code.clone(), info.clone());
+
+        (
+            bytes_received,
+            lock.db_path.clone(),
+            info,
+            lock.disable_request_log,
+        )
+    };
+
+    // Save to SQLite asynchronously outside lock
     tokio::task::spawn_blocking(move || {
         if let Err(e) = save_upload_to_db(&db_path, &save_info) {
-            eprintln!("[DB] Failed to save register to DB: {}", e);
+            log_err(format!("[DB] Failed to save register to DB: {}", e));
         }
     });
 
-    // Only create/truncate the file if it's a fresh upload
-    if bytes_received == 0 {
-        if let Some(parent) = file_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(file) = std::fs::File::create(&file_path) {
-            let _ = file.set_len(payload.file_size);
-        }
-    } else {
-        // If resuming, just ensure the file exists
-        if !file_path.exists() {
-            if let Some(parent) = file_path.parent() {
+    // Only create/truncate the file if it's a fresh upload or missing on disk, outside lock
+    if bytes_received == 0 || !disk_exists {
+        let target_path = file_path.clone();
+        let target_size = payload.file_size;
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Some(parent) = target_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if let Ok(file) = std::fs::File::create(&file_path) {
-                let _ = file.set_len(payload.file_size);
+            if let Ok(file) = std::fs::File::create(&target_path) {
+                let _ = file.set_len(target_size);
             }
-        }
+        })
+        .await;
     }
 
-    if !lock.disable_request_log {
-        println!(
+    if !disable_log {
+        log_info(format!(
             "[HTTP] Registered upload. File: {}, Size: {}, Hash ID: {}, Resume Offset: {}",
             payload.file_name, payload.file_size, payload.packet_code, bytes_received
-        );
+        ));
     }
 
     Json(json!({
@@ -1566,33 +1636,40 @@ async fn register_upload(
 }
 
 async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
-    let interval_mins = {
+    let (interval_mins, initial_disable_log) = {
         let lock = state.read().await;
-        lock.cleanup_interval
+        (lock.cleanup_interval, lock.disable_request_log)
     };
-    println!(
-        "File retention cleanup worker started. Scan interval: {} minutes.",
-        interval_mins
-    );
+    if !initial_disable_log {
+        log_info(format!(
+            "File retention cleanup worker started. Scan interval: {} minutes.",
+            interval_mins
+        ));
+    }
     loop {
         // Run checks based on the configured cleanup interval
         tokio::time::sleep(tokio::time::Duration::from_secs(interval_mins * 60)).await;
         let now = Utc::now();
-        println!("[Cleanup Scan] Running scan at {}", now.to_rfc3339());
         let mut to_delete = Vec::new();
         let mut updates_to_save = Vec::new();
+        let mut debug_logs = Vec::new();
 
-        {
+        let disable_log = {
             let lock = state.read().await;
             let completed_timeout = lock.completed_timeout_mins;
+            let disable_log = lock.disable_request_log;
             for (code, upload) in &lock.uploads {
                 let active_count = lock.active_downloads.get(code).copied().unwrap_or(0);
-                println!(
-                    "[Cleanup Debug] Checked {} (status: {}) - active downloads: {}, delete_at: {:?}, extended_delete_at: {:?}",
-                    upload.file_name, upload.status, active_count,
-                    upload.delete_at.map(|dt| dt.to_rfc3339()),
-                    upload.extended_delete_at.map(|dt| dt.to_rfc3339())
-                );
+                if !disable_log {
+                    debug_logs.push(format!(
+                        "[Cleanup Debug] Checked {} (status: {}) - active downloads: {}, delete_at: {:?}, extended_delete_at: {:?}",
+                        upload.file_name,
+                        upload.status,
+                        active_count,
+                        upload.delete_at.map(|dt| dt.to_rfc3339()),
+                        upload.extended_delete_at.map(|dt| dt.to_rfc3339())
+                    ));
+                }
                 if let Some(delete_at) = upload.delete_at {
                     if now >= delete_at {
                         if active_count > 0 {
@@ -1600,11 +1677,12 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
                             if upload.extended_delete_at.is_none() {
                                 let new_ext =
                                     delete_at + chrono::Duration::minutes(completed_timeout);
-                                updates_to_save.push((code.clone(), new_ext));
-                                println!(
-                                    "[Cleanup] File {} has active downloads ({}). Delaying deletion. New extended_delete_at: {}",
-                                    upload.file_name, active_count, new_ext
-                                );
+                                updates_to_save.push((
+                                    code.clone(),
+                                    upload.file_name.clone(),
+                                    active_count,
+                                    new_ext,
+                                ));
                             } else if let Some(ext_time) = upload.extended_delete_at {
                                 // Already extended, delete if extended time reached
                                 if now >= ext_time {
@@ -1626,16 +1704,43 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
                     }
                 }
             }
+            disable_log
+        };
+
+        if !disable_log {
+            log_info(format!(
+                "[Cleanup Scan] Running scan at {}",
+                now.to_rfc3339()
+            ));
+            for line in debug_logs {
+                log_info(line);
+            }
         }
 
         // Apply extensions to state and database
-        for (code, ext_time) in updates_to_save {
-            let mut lock = state.write().await;
-            let db_path = lock.db_path.clone();
-            if let Some(upload) = lock.uploads.get_mut(&code) {
-                upload.extended_delete_at = Some(ext_time);
-
-                // Save to SQLite
+        if !updates_to_save.is_empty() {
+            let mut db_updates = Vec::with_capacity(updates_to_save.len());
+            let mut ext_logs = Vec::new();
+            {
+                let mut lock = state.write().await;
+                let db_path = lock.db_path.clone();
+                for (code, file_name, active_count, ext_time) in updates_to_save {
+                    if let Some(upload) = lock.uploads.get_mut(&code) {
+                        upload.extended_delete_at = Some(ext_time);
+                        db_updates.push((db_path.clone(), code, ext_time));
+                        if !disable_log {
+                            ext_logs.push(format!(
+                                "[Cleanup] File {} has active downloads ({}). Delaying deletion. New extended_delete_at: {}",
+                                file_name, active_count, ext_time
+                            ));
+                        }
+                    }
+                }
+            }
+            for line in ext_logs {
+                log_info(line);
+            }
+            for (db_path, code, ext_time) in db_updates {
                 tokio::task::spawn_blocking(move || {
                     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
                         let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
@@ -1648,64 +1753,80 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
             }
         }
 
-        for (code, file_name, is_completed) in to_delete {
-            let mut lock = state.write().await;
-            lock.uploads.remove(&code);
-
-            let file_name_disk = format!("{}.bin", code);
-            let file_path = std::path::Path::new(&lock.upload_dir).join(&file_name_disk);
-            let _ = std::fs::remove_file(&file_path);
-
-            let db_path = lock.db_path.clone();
-            let code_clone = code.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-                    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
-                    let _ = conn.execute(
-                        "DELETE FROM uploads WHERE packet_code = ?1",
-                        rusqlite::params![code_clone],
-                    );
+        if !to_delete.is_empty() {
+            let mut delete_jobs = Vec::with_capacity(to_delete.len());
+            {
+                let mut lock = state.write().await;
+                let upload_dir = lock.upload_dir.clone();
+                let db_path = lock.db_path.clone();
+                for (code, file_name, is_completed) in to_delete {
+                    lock.uploads.remove(&code);
+                    let file_path = std::path::Path::new(&upload_dir).join(format!("{}.bin", code));
+                    delete_jobs.push((code, file_name, is_completed, file_path, db_path.clone()));
                 }
-            })
-            .await;
+            }
 
-            let type_str = if is_completed {
-                "completed"
-            } else {
-                "incomplete"
-            };
-            println!(
-                "[Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
-                type_str, code, file_name
-            );
+            for (code, file_name, is_completed, file_path, db_path) in delete_jobs {
+                let code_clone = code.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let _ = std::fs::remove_file(&file_path);
+                    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+                        let _ = conn.execute(
+                            "DELETE FROM uploads WHERE packet_code = ?1",
+                            rusqlite::params![code_clone],
+                        );
+                    }
+                })
+                .await;
+
+                if !disable_log {
+                    let type_str = if is_completed {
+                        "completed"
+                    } else {
+                        "incomplete"
+                    };
+                    log_info(format!(
+                        "[Cleanup] Automatically deleted {} file and logs for Hash ID: {}, file name: {}",
+                        type_str, code, file_name
+                    ));
+                }
+            }
         }
 
         // Scan directory for unidentified files (not tracked in database/memory)
-        let (upload_dir, incomplete_timeout) = {
+        let (upload_dir, incomplete_timeout, disable_log, tracked_codes): (
+            String,
+            i64,
+            bool,
+            HashSet<String>,
+        ) = {
             let lock = state.read().await;
-            (lock.upload_dir.clone(), lock.incomplete_timeout_mins)
+            (
+                lock.upload_dir.clone(),
+                lock.incomplete_timeout_mins,
+                lock.disable_request_log,
+                lock.uploads.keys().cloned().collect(),
+            )
         };
 
-        if let Ok(entries) = std::fs::read_dir(&upload_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        let exists = {
-                            let lock = state.read().await;
-                            lock.uploads.contains_key(stem)
-                        };
-                        if !exists {
-                            if let Ok(metadata) = std::fs::metadata(&path) {
-                                if let Ok(modified) = metadata.modified() {
-                                    if let Ok(elapsed) = modified.elapsed() {
-                                        let elapsed_mins = elapsed.as_secs() / 60;
-                                        if elapsed_mins as i64 >= incomplete_timeout {
-                                            let _ = std::fs::remove_file(&path);
-                                            println!(
-                                                "[Cleanup] Deleted unidentified file from disk (inactive for {} mins): {:?}",
-                                                elapsed_mins, path
-                                            );
+        let deleted_unidentified = tokio::task::spawn_blocking(move || {
+            let mut deleted = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&upload_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            if !tracked_codes.contains(stem) {
+                                if let Ok(metadata) = std::fs::metadata(&path) {
+                                    if let Ok(modified) = metadata.modified() {
+                                        if let Ok(elapsed) = modified.elapsed() {
+                                            let elapsed_mins = elapsed.as_secs() / 60;
+                                            if elapsed_mins as i64 >= incomplete_timeout
+                                                && std::fs::remove_file(&path).is_ok()
+                                            {
+                                                deleted.push((elapsed_mins, path));
+                                            }
                                         }
                                     }
                                 }
@@ -1713,6 +1834,18 @@ async fn run_cleanup_worker(state: Arc<RwLock<ServerState>>) {
                         }
                     }
                 }
+            }
+            deleted
+        })
+        .await
+        .unwrap_or_default();
+
+        if !disable_log {
+            for (elapsed_mins, path) in deleted_unidentified {
+                log_info(format!(
+                    "[Cleanup] Deleted unidentified file from disk (inactive for {} mins): {:?}",
+                    elapsed_mins, path
+                ));
             }
         }
     }
@@ -1723,11 +1856,11 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
     let socket = match std::net::UdpSocket::bind(addr) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Failed to bind UDP socket to port {}: {}", port, e);
+            log_err(format!("Failed to bind UDP socket to port {}: {}", port, e));
             return;
         }
     };
-    println!("UDP Server running on {}", addr);
+    log_info(format!("UDP Server running on {}", addr));
 
     socket.set_nonblocking(true).unwrap();
     let socket = tokio::net::UdpSocket::from_std(socket).unwrap();
@@ -1743,20 +1876,13 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                         let unique_id = common::bytes_to_unique_id(packet.packet_code);
                         let is_end = packet.status == 0;
 
-                        {
+                        let upload_dir = {
                             let mut lock = state.write().await;
                             let incomplete_timeout = lock.incomplete_timeout_mins;
                             let completed_timeout = lock.completed_timeout_mins;
                             let upload_dir = lock.upload_dir.clone();
                             lock.uploads.entry(unique_id.clone()).or_insert_with(|| {
                                 let name = format!("{}.bin", unique_id);
-                                let file_name_disk = format!("{}.bin", unique_id);
-                                let file_path =
-                                    std::path::Path::new(&upload_dir).join(&file_name_disk);
-                                if let Some(parent) = file_path.parent() {
-                                    let _ = std::fs::create_dir_all(parent);
-                                }
-                                let _ = std::fs::File::create(&file_path);
                                 let delete_at = if is_end {
                                     Some(Utc::now() + chrono::Duration::minutes(completed_timeout))
                                 } else {
@@ -1764,7 +1890,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                 };
                                 UploadInfo {
                                     packet_code: unique_id.clone(),
-                                    file_name: name.clone(),
+                                    file_name: name,
                                     file_size: if is_end { packet.seek_begin } else { 0 },
                                     bytes_received: 0,
                                     status: "Đang nhận".to_string(),
@@ -1776,20 +1902,26 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                                     password: None,
                                 }
                             });
+                            upload_dir
                         };
 
                         let mut write_success = is_end; // End packet has no data, treated as success
                         if !is_end && !packet.data.is_empty() {
                             let file_name_disk = format!("{}.bin", unique_id);
-                            let file_path = std::path::Path::new(&state.read().await.upload_dir)
-                                .join(&file_name_disk);
+                            let file_path = std::path::Path::new(&upload_dir).join(&file_name_disk);
                             let seek_begin = packet.seek_begin;
                             let data = packet.data.to_vec();
 
                             let write_res = tokio::task::spawn_blocking(move || {
                                 use std::fs::OpenOptions;
                                 use std::io::{Seek, SeekFrom, Write};
-                                let mut file = OpenOptions::new().write(true).open(&file_path)?;
+                                if let Some(parent) = file_path.parent() {
+                                    let _ = std::fs::create_dir_all(parent);
+                                }
+                                let mut file = OpenOptions::new()
+                                    .create(true)
+                                    .write(true)
+                                    .open(&file_path)?;
                                 file.seek(SeekFrom::Start(seek_begin))?;
                                 // write_all copies data into the OS page cache. Flushing every UDP chunk
                                 // serializes the hot path and destroys throughput; durability is handled
@@ -1802,57 +1934,82 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                             if let Ok(Ok(())) = write_res {
                                 write_success = true;
                             }
+                        } else if is_end {
+                            // Ensure file exists on disk even for 0-byte uploads without HTTP register
+                            let file_path = std::path::Path::new(&upload_dir)
+                                .join(format!("{}.bin", unique_id));
+                            let _ = tokio::task::spawn_blocking(move || {
+                                if !file_path.exists() {
+                                    if let Some(parent) = file_path.parent() {
+                                        let _ = std::fs::create_dir_all(parent);
+                                    }
+                                    let _ = std::fs::File::create(&file_path);
+                                }
+                            })
+                            .await;
                         }
 
                         if write_success {
-                            let mut lock = state.write().await;
-                            let db_path = lock.db_path.clone();
-                            let completed_timeout = lock.completed_timeout_mins;
-                            let incomplete_timeout = lock.incomplete_timeout_mins;
-                            let disable_log = lock.disable_request_log;
-                            if let Some(entry) = lock.uploads.get_mut(&unique_id) {
-                                if is_end {
-                                    entry.status = "Hoàn thành".to_string();
-                                    entry.completed_at = Some(Utc::now());
-                                    entry.file_size = packet.seek_begin;
-                                    entry.bytes_received = packet.seek_begin;
-                                    entry.delete_at = Some(
-                                        Utc::now() + chrono::Duration::minutes(completed_timeout),
-                                    );
-                                    if !disable_log {
-                                        println!(
-                                            "[UDP] Completed upload of file: {}",
-                                            entry.file_name
+                            let (completed_file_log, db_save_job) = {
+                                let mut lock = state.write().await;
+                                let db_path = lock.db_path.clone();
+                                let completed_timeout = lock.completed_timeout_mins;
+                                let incomplete_timeout = lock.incomplete_timeout_mins;
+                                let disable_log = lock.disable_request_log;
+                                let mut completed_file_log = None;
+                                let mut db_save_job = None;
+
+                                if let Some(entry) = lock.uploads.get_mut(&unique_id) {
+                                    if is_end {
+                                        entry.status = "Hoàn thành".to_string();
+                                        entry.completed_at = Some(Utc::now());
+                                        entry.file_size = packet.seek_begin;
+                                        entry.bytes_received = packet.seek_begin;
+                                        entry.delete_at = Some(
+                                            Utc::now()
+                                                + chrono::Duration::minutes(completed_timeout),
+                                        );
+                                        if !disable_log {
+                                            completed_file_log = Some(entry.file_name.clone());
+                                        }
+                                    } else {
+                                        let end_pos = packet.seek_begin + packet.data.len() as u64;
+                                        if end_pos > entry.bytes_received {
+                                            entry.bytes_received = end_pos;
+                                        }
+                                        if entry.file_size < entry.bytes_received {
+                                            entry.file_size = entry.bytes_received;
+                                        }
+                                        entry.delete_at = Some(
+                                            Utc::now()
+                                                + chrono::Duration::minutes(incomplete_timeout),
                                         );
                                     }
-                                } else {
-                                    let end_pos = packet.seek_begin + packet.data.len() as u64;
-                                    if end_pos > entry.bytes_received {
-                                        entry.bytes_received = end_pos;
-                                    }
-                                    if entry.file_size < entry.bytes_received {
-                                        entry.file_size = entry.bytes_received;
-                                    }
-                                    entry.delete_at = Some(
-                                        Utc::now() + chrono::Duration::minutes(incomplete_timeout),
-                                    );
-                                }
 
-                                // Persist completion immediately, but checkpoint active uploads only
-                                // once per MiB boundary instead of doing a SQLite transaction per packet.
-                                const DB_CHECKPOINT_BYTES: u64 = 1024 * 1024;
-                                let end_pos = packet.seek_begin + packet.data.len() as u64;
-                                let should_persist = is_end
-                                    || end_pos / DB_CHECKPOINT_BYTES
-                                        != packet.seek_begin / DB_CHECKPOINT_BYTES;
-                                if should_persist {
-                                    let save_info = entry.clone();
-                                    tokio::task::spawn_blocking(move || {
-                                        if let Err(e) = save_upload_to_db(&db_path, &save_info) {
-                                            eprintln!("[DB] Failed to save update to DB: {}", e);
-                                        }
-                                    });
+                                    // Persist completion immediately, but checkpoint active uploads only
+                                    // once per MiB boundary instead of doing a SQLite transaction per packet.
+                                    const DB_CHECKPOINT_BYTES: u64 = 1024 * 1024;
+                                    let end_pos = packet.seek_begin + packet.data.len() as u64;
+                                    let should_persist = is_end
+                                        || end_pos / DB_CHECKPOINT_BYTES
+                                            != packet.seek_begin / DB_CHECKPOINT_BYTES;
+                                    if should_persist {
+                                        db_save_job = Some((db_path, entry.clone()));
+                                    }
                                 }
+                                (completed_file_log, db_save_job)
+                            };
+
+                            if let Some(file_name) = completed_file_log {
+                                log_info(format!("[UDP] Completed upload of file: {}", file_name));
+                            }
+
+                            if let Some((db_path, save_info)) = db_save_job {
+                                tokio::task::spawn_blocking(move || {
+                                    if let Err(e) = save_upload_to_db(&db_path, &save_info) {
+                                        log_err(format!("[DB] Failed to save update to DB: {}", e));
+                                    }
+                                });
                             }
 
                             // Send back ACK only on success
@@ -1875,7 +2032,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
                     Err(e) => {
                         let disable_log = state.read().await.disable_request_log;
                         if !disable_log {
-                            eprintln!("[UDP] Error parsing packet: {}", e);
+                            log_err(format!("[UDP] Error parsing packet: {}", e));
                         }
                     }
                 }
@@ -1886,7 +2043,7 @@ async fn run_udp_server(state: Arc<RwLock<ServerState>>, port: u16) {
             Err(e) => {
                 let disable_log = state.read().await.disable_request_log;
                 if !disable_log {
-                    eprintln!("[UDP] Recv error: {}", e);
+                    log_err(format!("[UDP] Recv error: {}", e));
                 }
             }
         }
@@ -1935,16 +2092,45 @@ async fn log_request(
     };
 
     if !disable_log {
-        println!("[HTTP] Request: {} {}", method, path);
+        log_info(format!("[HTTP] Request: {} {}", method, path));
     }
 
     next.run(req).await
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut sig) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            sig.recv().await;
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }
 
 #[tokio::main]
 async fn main() {
     // Parse command line arguments
     let args = Args::parse();
+
+    if let Some(cmd) = args.command {
+        std::process::exit(service::handle_command(cmd));
+    }
+
+    init_nonblocking_logger();
 
     let upload_dir = args.upload_dir.clone();
     let _ = std::fs::create_dir_all(&upload_dir);
@@ -1956,21 +2142,26 @@ async fn main() {
         .unwrap_or(std::path::Path::new("."));
     let _ = std::fs::create_dir_all(db_dir);
     if let Err(e) = init_db(&db_path) {
-        eprintln!("[DB] Failed to initialize SQLite database: {}", e);
+        log_err(format!("[DB] Failed to initialize SQLite database: {}", e));
         std::process::exit(1);
     }
 
     // Load existing uploads from SQLite
     let uploads = match load_uploads_from_db(&db_path) {
         Ok(map) => {
-            println!("[DB] Loaded {} uploads from SQLite database.", map.len());
+            if !args.disable_request_log {
+                log_info(format!(
+                    "[DB] Loaded {} uploads from SQLite database.",
+                    map.len()
+                ));
+            }
             map
         }
         Err(e) => {
-            eprintln!(
+            log_err(format!(
                 "[DB] Failed to load uploads from DB: {}. Starting with empty cache.",
                 e
-            );
+            ));
             HashMap::new()
         }
     };
@@ -2014,7 +2205,53 @@ async fn main() {
         .with_state(state);
 
     let http_addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
-    println!("HTTP Server running on http://{}", http_addr);
+    log_info(format!("HTTP Server running on http://{}", http_addr));
     let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nonblocking_logger_drops_when_channel_full() {
+        let (tx, _rx_stalled) = tokio::sync::mpsc::channel::<(bool, String)>(2);
+        assert!(try_enqueue_log(&tx, false, "msg 1".to_string()));
+        assert!(try_enqueue_log(&tx, false, "msg 2".to_string()));
+        // Receiver is not draining; third send must return false immediately without blocking
+        assert!(!try_enqueue_log(&tx, false, "msg 3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_server_state_rwlock_concurrent_access() {
+        let state = Arc::new(RwLock::new(ServerState {
+            uploads: HashMap::new(),
+            active_downloads: HashMap::new(),
+            upload_dir: "./uploads".to_string(),
+            db_path: "./db/data.sqlite".to_string(),
+            cleanup_interval: 5,
+            incomplete_timeout_mins: 60,
+            completed_timeout_mins: 15,
+            disable_request_log: true,
+        }));
+
+        let s1 = state.clone();
+        let s2 = state.clone();
+
+        let writer = tokio::spawn(async move {
+            let mut lock = s1.write().await;
+            lock.active_downloads.insert("abc".to_string(), 1);
+        });
+        let reader = tokio::spawn(async move {
+            let lock = s2.read().await;
+            lock.uploads.len()
+        });
+
+        writer.await.unwrap();
+        assert_eq!(reader.await.unwrap(), 0);
+    }
 }
