@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -11,15 +12,85 @@ use tauri::{
 
 struct AppQuitState(AtomicBool);
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+struct SavedWindowGeometry(Mutex<Option<(tauri::PhysicalSize<u32>, bool)>>);
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn capture_window_geometry(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(true) {
+            return;
+        }
+        let is_maximized = window.is_maximized().unwrap_or(false);
+        let size = window
+            .inner_size()
+            .ok()
+            .filter(|s| s.width >= 680 && s.height >= 560);
+        if let Ok(mut guard) = app.state::<SavedWindowGeometry>().0.lock() {
+            let prev_size = guard.map(|(prev, _)| prev);
+            if let Some(s) = size.or(prev_size) {
+                *guard = Some((s, is_maximized));
+            }
+        }
+    }
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let was_hidden = !window.is_visible().unwrap_or(true);
         let _ = window.unminimize();
         let _ = window.show();
-        let _ = window.set_focus();
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = was_hidden;
+            let _ = window.set_focus();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let win = window.clone();
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                // Allow GTK/tao to process WindowRequest::Visible(true) and close the tray menu
+                // before issuing set_focus(), otherwise tao's get_visible() check drops Focus.
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                let _ = win.set_focus();
+
+                if was_hidden {
+                    // Workaround for Linux Wayland/GTK3 (Tauri #11856): toggling resizable
+                    // forces GTK/Wayland to rebuild CSD headerbar input regions so
+                    // minimize/maximize/close buttons respond after hide() -> show().
+                    let _ = win.set_resizable(false);
+                    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                    let _ = win.set_resizable(true);
+                    let _ = win.set_minimizable(true);
+                    let _ = win.set_maximizable(true);
+                    let _ = win.set_closable(true);
+
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    let saved = app_handle
+                        .state::<SavedWindowGeometry>()
+                        .0
+                        .lock()
+                        .ok()
+                        .and_then(|g| *g);
+                    if let Some((saved_size, was_maximized)) = saved {
+                        if was_maximized {
+                            let _ = win.maximize();
+                        } else {
+                            let _ = win.set_size(tauri::Size::Physical(saved_size));
+                        }
+                    }
+                    let _ = win.set_focus();
+                }
+            });
+        }
     }
 }
 
 fn hide_main_window(app: &tauri::AppHandle) {
+    capture_window_geometry(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -160,6 +231,7 @@ async fn perform_upload(
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(AppQuitState(AtomicBool::new(false)))
+        .manage(SavedWindowGeometry(Mutex::new(None)))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             #[cfg(desktop)]
@@ -175,6 +247,7 @@ pub fn run() {
                     .load(Ordering::SeqCst);
                 if !is_quitting {
                     api.prevent_close();
+                    capture_window_geometry(window.app_handle());
                     let _ = window.hide();
                 }
             }
